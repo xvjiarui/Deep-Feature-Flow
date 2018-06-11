@@ -15,7 +15,7 @@ import logging
 import pprint
 import os
 import sys
-from config.config import config, update_config
+from config.config import config, update_config, update_philly_config
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train R-FCN network')
@@ -25,6 +25,13 @@ def parse_args():
     args, rest = parser.parse_known_args()
     # update config
     update_config(args.cfg)
+
+    # modfication for philly
+    if config.USE_PHILLY:
+        parser.add_argument('--dataDir', help='input directory for Philly jobs', required=True, type=str)
+        parser.add_argument('--modelDir', help='output directory for Philly jobs', required=True, type=str)
+        args, rest = parser.parse_known_args()
+        update_philly_config(args.modelDir, args.dataDir)
 
     # training
     parser.add_argument('--frequent', help='frequency of logging', default=config.default.frequent, type=int)
@@ -71,7 +78,7 @@ def train_net(args, ctx, pretrained, pretrained_flow, epoch, prefix, begin_epoch
     # load dataset and prepare imdb for training
     image_sets = [iset for iset in config.dataset.image_set.split('+')]
     roidbs = [load_gt_roidb(config.dataset.dataset, image_set, config.dataset.root_path, config.dataset.dataset_path,
-                            flip=config.TRAIN.FLIP)
+                            flip=config.TRAIN.FLIP, use_philly = config.USE_PHILLY)
               for image_set in image_sets]
     roidb = merge_roidb(roidbs)
     roidb = filter_roidb(roidb, config)
@@ -133,7 +140,13 @@ def train_net(args, ctx, pretrained, pretrained_flow, epoch, prefix, begin_epoch
     for child_metric in [rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric, eval_metric, cls_metric, bbox_metric]:
         eval_metrics.add(child_metric)
     # callback
-    batch_end_callback = callback.Speedometer(train_data.batch_size, frequent=args.frequent)
+    batch_end_callback = [callback.Speedometer(train_data.batch_size, frequent=args.frequent)]
+    
+    if config.USE_PHILLY:
+        total_iter = (config.TRAIN.end_epoch - config.TRAIN.begin_epoch) * len(roidb) / input_batch_size
+        progress_frequent = min(args.frequent * 10, 100)
+        batch_end_callback.append(callback.PhillyProgressCallback(total_iter, progress_frequent))
+
     means = np.tile(np.array(config.TRAIN.BBOX_MEANS), 2 if config.CLASS_AGNOSTIC else config.dataset.NUM_CLASSES)
     stds = np.tile(np.array(config.TRAIN.BBOX_STDS), 2 if config.CLASS_AGNOSTIC else config.dataset.NUM_CLASSES)
     epoch_end_callback = [mx.callback.module_checkpoint(mod, prefix, period=1, save_optimizer_states=True), callback.do_checkpoint(prefix, means, stds)]

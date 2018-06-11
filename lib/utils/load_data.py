@@ -3,9 +3,9 @@ from dataset import *
 
 
 def load_gt_roidb(dataset_name, image_set_name, root_path, dataset_path, result_path=None,
-                  flip=False):
+                  flip=False, use_philly=False):
     """ load ground truth roidb """
-    imdb = eval(dataset_name)(image_set_name, root_path, dataset_path, result_path)
+    imdb = eval(dataset_name)(image_set_name, root_path, dataset_path, result_path, use_philly=use_philly)
     roidb = imdb.gt_roidb()
     if flip:
         roidb = imdb.append_flipped_images(roidb)

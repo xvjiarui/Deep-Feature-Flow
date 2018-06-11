@@ -24,7 +24,7 @@ from ds_utils import unique_boxes, filter_small_boxes
 
 
 class ImageNetVID(IMDB):
-    def __init__(self, image_set, root_path, dataset_path, result_path=None):
+    def __init__(self, image_set, root_path, dataset_path, result_path=None, use_philly=False):
         """
         fill basic information to initialize imdb
         """
@@ -57,6 +57,7 @@ class ImageNetVID(IMDB):
         self.num_classes = len(self.classes)
         self.load_image_set_index()
         self.num_images = len(self.image_set_index)
+        self.use_philly = use_philly
         print 'num_images', self.num_images
 
     def load_image_set_index(self):
