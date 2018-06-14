@@ -654,10 +654,179 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         cls_prob = mx.sym.Reshape(data=cls_prob, shape=(cfg.TRAIN.BATCH_IMAGES, -1, num_classes), name='cls_prob_reshape')
         bbox_loss = mx.sym.Reshape(data=bbox_loss, shape=(cfg.TRAIN.BATCH_IMAGES, -1, 4 * num_reg_classes), name='bbox_loss_reshape')
 
-        group = mx.sym.Group([rpn_cls_prob, rpn_bbox_loss, cls_prob, bbox_loss, mx.sym.BlockGrad(rcnn_label)])
-        self.sym = group
-        return group
+        output_sym_list = [rpn_cls_prob, rpn_bbox_loss, cls_prob, bbox_loss, mx.sym.BlockGrad(rcnn_label)]
 
+        ######################### learn nms #########################
+        # notice that all implementation of python ops try to leave batch idx support for multi-batch
+        # thus, rois are [batch_ind, x_min, y_min, x_max, y_max]
+        nms_target_thresh = np.fromstring(cfg.network.NMS_TARGET_THRESH, dtype=float, sep=',')
+        num_thresh = len(nms_target_thresh)
+        nms_eps = 1e-8
+        first_n = cfg.TRAIN.FIRST_N
+        num_fg_classes = num_classes - 1
+        bbox_means = cfg.TRAIN.BBOX_MEANS
+        bbox_stds = cfg.TRAIN.BBOX_STDS 
+        nongt_dim = cfg.TRAIN.RPN_POST_NMS_TOP_N
+        
+        # remove gt here
+        cls_score_nongt = mx.sym.slice_axis(data=cls_score, axis=0, begin=0, end=nongt_dim)
+        bbox_pred_nongt = mx.sym.slice_axis(data=bbox_pred, axis=0, begin=0, end=nongt_dim)
+        bbox_pred_nongt = mx.sym.BlockGrad(bbox_pred_nongt)
+
+        # refine bbox
+        # remove batch idx and gt roi
+        sliced_rois = mx.sym.slice(data=rois, begin=(0, 1), end=(nongt_dim, None))
+        # bbox_pred_nobg, [num_rois, 4*(num_reg_classes-1)]
+        bbox_pred_nobg = mx.sym.slice_axis(data=bbox_pred_nongt, axis=1, begin=4, end=None)
+        # [num_boxes, 4, num_reg_classes-1]
+        refined_bbox = self.refine_bbox(sliced_rois, bbox_pred_nobg, im_info,
+                                        means=bbox_means, stds=bbox_stds
+                                        )
+        # softmax cls_score to cls_prob, [num_rois, num_classes]
+        cls_prob = mx.sym.softmax(data=cls_score_nongt, axis=-1)
+        cls_prob_nobg = mx.sym.slice_axis(cls_prob, axis=1, begin=1, end=None)
+        sorted_cls_prob_nobg = mx.sym.sort(data=cls_prob_nobg, axis=0, is_ascend=False)
+        # sorted_score, [first_n, num_fg_classes]
+        sorted_score = mx.sym.slice_axis(sorted_cls_prob_nobg, axis=0,
+                                         begin=0, end=first_n, name='sorted_score')
+        # sort by score
+        rank_indices = mx.sym.argsort(data=cls_prob_nobg, axis=0, is_ascend=False)
+        # first_rank_indices, [first_n, num_fg_classes]
+        first_rank_indices = mx.sym.slice_axis(rank_indices, axis=0, begin=0, end=first_n)
+        # sorted_bbox, [first_n, num_fg_classes, 4, num_reg_classes-1]
+        sorted_bbox = mx.sym.take(a=refined_bbox, indices=first_rank_indices)
+        if cfg.CLASS_AGNOSTIC:
+            # sorted_bbox, [first_n, num_fg_classes, 4]
+            sorted_bbox = mx.sym.Reshape(sorted_bbox, shape=(0, 0, 0), name='sorted_bbox')
+        else:
+            cls_mask = mx.sym.arange(0, num_fg_classes)
+            cls_mask = mx.sym.Reshape(cls_mask, shape=(1, -1, 1))
+            cls_mask = mx.sym.broadcast_to(cls_mask, shape=(first_n, 0, 4))
+            # sorted_bbox, [first_n, num_fg_classes, 4]
+            sorted_bbox = mx.sym.pick(data=sorted_bbox, name='sorted_bbox',
+                                      index=cls_mask, axis=3)
+        # nms_rank_embedding, [first_n, 1024]
+        nms_rank_embedding = self.extract_rank_embedding(first_n, 1024)
+        # nms_rank_feat, [first_n, 1024]
+        nms_rank_feat = mx.sym.FullyConnected(name='nms_rank', data=nms_rank_embedding, num_hidden=128)
+        # nms_position_matrix, [num_fg_classes, first_n, first_n, 4]
+        nms_position_matrix = self.extract_multi_position_matrix(sorted_bbox)
+        # roi_feature_embedding, [num_rois, 1024]
+        roi_feat_embedding = mx.sym.FullyConnected(
+            name='roi_feat_embedding',
+            data=fc_all_2_relu,
+            num_hidden=128)
+        # sorted_roi_feat, [first_n, num_fg_classes, 128]
+        sorted_roi_feat = mx.sym.take(a=roi_feat_embedding, indices=first_rank_indices)
+
+        # vectorized nms
+        # nms_embedding_feat, [first_n, num_fg_classes, 128]
+        nms_embedding_feat = mx.sym.broadcast_add(
+            lhs=sorted_roi_feat,
+            rhs=mx.sym.expand_dims(nms_rank_feat, axis=1))
+        # nms_attention_1, [first_n, num_fg_classes, 1024]
+        nms_attention_1, nms_softmax_1 = self.attention_module_nms_multi_head(
+            nms_embedding_feat, nms_position_matrix,
+            num_rois=first_n, index=1, group=16,
+            dim=(1024, 1024, 128), fc_dim=(64, 16), feat_dim=128)
+        nms_all_feat_1 = nms_embedding_feat + nms_attention_1
+        nms_all_feat_1_relu = mx.sym.Activation(data=nms_all_feat_1, act_type='relu', name='nms_all_feat_1_relu')
+        # [first_n * num_fg_classes, 1024]
+        nms_all_feat_1_relu_reshape = mx.sym.Reshape(nms_all_feat_1_relu, shape=(-3, -2))
+        # logit, [first_n * num_fg_classes, num_thresh]
+        nms_conditional_logit = mx.sym.FullyConnected(name='nms_logit',
+                                                      data=nms_all_feat_1_relu_reshape,
+                                                      num_hidden=num_thresh)
+        # logit_reshape, [first_n, num_fg_classes, num_thresh]
+        nms_conditional_logit_reshape = mx.sym.Reshape(nms_conditional_logit,
+                                                       shape=(first_n, num_fg_classes, num_thresh))
+        nms_conditional_score = mx.sym.Activation(data=nms_conditional_logit_reshape,
+                                                  act_type='sigmoid', name='nms_conditional_score')
+        sorted_score_reshape = mx.sym.expand_dims(sorted_score, axis=2)
+        # sorted_score_reshape = mx.sym.BlockGrad(sorted_score_reshape)
+        nms_multi_score = mx.sym.broadcast_mul(lhs=sorted_score_reshape, rhs=nms_conditional_score)
+
+        nms_multi_target = mx.sym.Custom(bbox=sorted_bbox, gt_bbox=gt_boxes, score=sorted_score,
+                                         op_type='nms_multi_target', target_thresh=nms_target_thresh)
+        nms_pos_loss = - mx.sym.broadcast_mul(lhs=nms_multi_target,
+                                              rhs=mx.sym.log(data=(nms_multi_score + nms_eps)))
+        nms_neg_loss = - mx.sym.broadcast_mul(lhs=(1.0 - nms_multi_target),
+                                              rhs=mx.sym.log(data=(1.0 - nms_multi_score + nms_eps)))
+        normalizer = first_n * num_thresh
+        nms_pos_loss = cfg.TRAIN.nms_loss_scale * nms_pos_loss / normalizer
+        nms_neg_loss = cfg.TRAIN.nms_loss_scale * nms_neg_loss / normalizer
+        ##########################  additional output!  ##########################
+        output_sym_list.append(mx.sym.BlockGrad(nms_multi_target, name='nms_multi_target_block'))
+        output_sym_list.append(mx.sym.BlockGrad(nms_conditional_score, name='nms_conditional_score_block'))
+        output_sym_list.append(mx.sym.MakeLoss(name='nms_pos_loss', data=nms_pos_loss,
+                                               grad_scale=cfg.TRAIN.nms_pos_scale))
+        output_sym_list.append(mx.sym.MakeLoss(name='nms_neg_loss', data=nms_neg_loss))
+
+        self.sym = mx.sym.Group(output_sym_list)
+        return self.sym
+
+    def learning_nms(self, cfg, output_sym_list):
+
+        ######################### learn nms #########################
+        # notice that all implementation of python ops try to leave batch idx support for multi-batch
+        # thus, rois are [batch_ind, x_min, y_min, x_max, y_max]
+        nms_target_thresh = np.fromstring(cfg.network.NMS_TARGET_THRESH, dtype=float, sep=',')
+        num_thresh = len(nms_target_thresh)
+        nms_eps = 1e-8
+        first_n = cfg.TEST.FIRST_N
+        num_fg_classes = num_classes - 1
+        bbox_means = cfg.TEST.BBOX_MEANS
+        bbox_stds = cfg.TEST.BBOX_STDS 
+        nongt_dim = cfg.TEST.RPN_POST_NMS_TOP_N
+
+        nms_rank_weight = mx.sym.var('nms_rank_weight', shape=(128, 1024), dtype=np.float32)
+        nms_rank_bias = mx.sym.var('nms_rank_bias', shape=(128,), dtype=np.float32)
+        roi_feat_embedding_weight = mx.sym.var('roi_feat_embedding_weight', shape=(128, 1024), dtype=np.float32)
+        roi_feat_embedding_bias = mx.sym.var('roi_feat_embedding_bias', shape=(128,), dtype=np.float32)
+        nms_pair_pos_fc1_1_weight = mx.sym.var('nms_pair_pos_fc1_1_weight', shape=(16, 64), dtype=np.float32)
+        nms_pair_pos_fc1_1_bias = mx.sym.var('nms_pair_pos_fc1_1_bias', shape=(16,), dtype=np.float32)
+        nms_query_1_weight = mx.sym.var('nms_query_1_weight', shape=(1024, 128), dtype=np.float32)
+        nms_query_1_bias = mx.sym.var('nms_query_1_bias', shape=(1024,), dtype=np.float32)
+        nms_key_1_weight = mx.sym.var('nms_key_1_weight', shape=(1024, 128), dtype=np.float32)
+        nms_key_1_bias = mx.sym.var('nms_key_1_bias', shape=(1024,), dtype=np.float32)
+        nms_linear_out_1_weight = mx.sym.var('nms_linear_out_1_weight', shape=(128, 128, 1, 1), dtype=np.float32)
+        nms_linear_out_1_bias = mx.sym.var('nms_linear_out_1_bias', shape=(128,), dtype=np.float32)
+        nms_logit_weight = mx.sym.var('nms_logit_weight', shape=(5, 128), dtype=np.float32)
+        nms_logit_bias = mx.sym.var('nms_logit_bias', shape=(5,), dtype=np.float32)
+
+        nms_multi_score, sorted_bbox, sorted_score = mx.sym.Custom(cls_score=cls_score, bbox_pred=bbox_pred,
+            rois=rois, im_info=im_info, nms_rank_weight=nms_rank_weight, fc_all_2_relu=fc_all_2_relu, 
+            nms_rank_bias=nms_rank_bias, 
+            roi_feat_embedding_weight=roi_feat_embedding_weight,
+            roi_feat_embedding_bias= roi_feat_embedding_bias, 
+            nms_pair_pos_fc1_1_weight=nms_pair_pos_fc1_1_weight, 
+            nms_pair_pos_fc1_1_bias=nms_pair_pos_fc1_1_bias, 
+            nms_query_1_weight=nms_query_1_weight, nms_query_1_bias=nms_query_1_bias, 
+            nms_key_1_weight=nms_key_1_weight, nms_key_1_bias=nms_key_1_bias,
+            nms_linear_out_1_weight= nms_linear_out_1_weight, 
+            nms_linear_out_1_bias=nms_linear_out_1_bias, 
+            nms_logit_weight=nms_logit_weight, nms_logit_bias=nms_logit_bias,
+            op_type='learn_nms', name='learn_nms',
+            num_fg_classes=num_fg_classes, 
+            bbox_means=bbox_means, bbox_stds=bbox_stds, first_n=first_n, 
+            class_agnostic=cfg.CLASS_AGNOSTIC, num_thresh=num_thresh, nongt_dim=nongt_dim, has_non_gt_index=False)
+
+        if cfg.TEST.MERGE_METHOD == -1:
+            nms_final_score = mx.sym.mean(data=nms_multi_score, axis=2, name='nms_final_score')
+        elif cfg.TEST.MERGE_METHOD == -2:
+            nms_final_score = mx.sym.max(data=nms_multi_score, axis=2, name='nms_final_score')
+        elif 0 <= cfg.TEST.MERGE_METHOD < num_thresh:
+            idx = cfg.TEST.MERGE_METHOD
+            nms_final_score = mx.sym.slice_axis(data=nms_multi_score, axis=2, begin=idx, end=idx + 1)
+            nms_final_score = mx.sym.Reshape(nms_final_score, shape=(0, 0), name='nms_final_score')
+        else:
+            raise NotImplementedError('Unknown merge method %s.' % cfg.TEST.MERGE_METHOD)
+        output_sym_list.append(sorted_bbox)
+        output_sym_list.append(sorted_score)
+        output_sym_list.append(nms_final_score)
+
+        return output_sym_list
+        
     def get_key_test_symbol(self, cfg):
 
         # config alias for convenient
@@ -730,9 +899,14 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         bbox_pred = mx.sym.Reshape(data=bbox_pred, shape=(cfg.TEST.BATCH_IMAGES, -1, 4 * num_reg_classes), name='bbox_pred_reshape')
 
         # group output
-        group = mx.sym.Group([data_key, feat_key, conv_feat, rois, cls_prob, bbox_pred])
-        self.sym = group
-        return group
+        output_sym_list = [data_key, feat_key, conv_feat, rois, cls_prob, bbox_pred]
+
+
+        output_sym_list = self.learning_nms(cfg, output_sym_list)
+
+        self.sym = mx.sym.Group(output_sym_list)
+        return self.sym
+
 
     def get_cur_test_symbol(self, cfg):
 
@@ -809,8 +983,10 @@ class resnet_v1_101_flownet_rfcn(Symbol):
         bbox_pred = mx.sym.Reshape(data=bbox_pred, shape=(cfg.TEST.BATCH_IMAGES, -1, 4 * num_reg_classes), name='bbox_pred_reshape')
 
         # group output
-        group = mx.sym.Group([rois, cls_prob, bbox_pred])
-        self.sym = group
+        output_sym_list = [rois, cls_prob, bbox_pred]
+
+        output_sym_list = self.learning_nms(cfg, output_sym_list)
+        self.sym = mx.sym.Group(output_sym_list)
         return group
 
     def get_batch_test_symbol(self, cfg):
