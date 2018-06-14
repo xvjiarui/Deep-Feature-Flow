@@ -43,6 +43,9 @@ config.network.ANCHOR_MEANS = (0.0, 0.0, 0.0, 0.0)
 config.network.ANCHOR_STDS = (0.1, 0.1, 0.4, 0.4)
 config.network.NUM_ANCHORS = len(config.network.ANCHOR_SCALES) * len(config.network.ANCHOR_RATIOS)
 config.network.DFF_FEAT_DIM = 1024
+config.network.ROIDispatch = False
+config.network.USE_NONGT_INDEX = False
+config.network.NMS_TARGET_THRESH = '0.5'
 
 # dataset related params
 config.dataset = edict()
@@ -67,6 +70,9 @@ config.TRAIN.wd = 0.0005
 config.TRAIN.begin_epoch = 0
 config.TRAIN.end_epoch = 0
 config.TRAIN.model_prefix = ''
+config.TRAIN.rpn_loss_scale = 3.0
+config.TRAIN.nms_loss_scale = 1.0
+config.TRAIN.nms_pos_scale = 4.0
 
 # whether resume training
 config.TRAIN.RESUME = False
@@ -119,6 +125,10 @@ config.TRAIN.RPN_MIN_SIZE = config.network.RPN_FEAT_STRIDE
 config.TRAIN.BBOX_NORMALIZATION_PRECOMPUTED = True
 config.TRAIN.BBOX_MEANS = (0.0, 0.0, 0.0, 0.0)
 config.TRAIN.BBOX_STDS = (0.1, 0.1, 0.2, 0.2)
+# Learn NMS
+config.TRAIN.LEARN_NMS = False
+config.TRAIN.JOINT_TRAINING = False
+config.TRAIN.FIRST_N = 100
 
 # DFF, trained image sampled from [min_offset, max_offset]
 config.TRAIN.MIN_OFFSET = -9
@@ -138,6 +148,13 @@ config.TEST.RPN_NMS_THRESH = 0.7
 config.TEST.RPN_PRE_NMS_TOP_N = 6000
 config.TEST.RPN_POST_NMS_TOP_N = 300
 config.TEST.RPN_MIN_SIZE = config.network.RPN_FEAT_STRIDE
+
+# whether to use softnms
+config.TEST.SOFTNMS = False
+# whether to use LEARN_NMS
+config.TEST.LEARN_NMS = False
+config.TEST.FIRST_N = 0
+config.TEST.MERGE_METHOD = -1
 
 # RCNN nms
 config.TEST.NMS = 0.3

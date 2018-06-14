@@ -62,7 +62,7 @@ TRAIN:
   warmup: false
   begin_epoch: 0
   end_epoch: 2
-  model_prefix: 'dff_rfcn_vid'
+  model_prefix: 'dff_dcn_vid'
   # whether resume training
   RESUME: false
   # whether flip image

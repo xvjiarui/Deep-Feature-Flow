@@ -1,11 +1,9 @@
 # --------------------------------------------------------
-# Deformable Convolutional Networks
-# Copyright (c) 2016 by Contributors
+# Relation Networks for Object Detection
 # Copyright (c) 2017 Microsoft
-# Licensed under The Apache-2.0 License [see LICENSE for details]
-# Modified by Jiayuan Gu
+# Licensed under The MIT License [see LICENSE for details]
+# Written by Jiayuan Gu, Dazhi Cheng
 # --------------------------------------------------------
-
 """
 Nms Multi-thresh Target Operator selects foreground and background roi,
     and assigns label, bbox_transform to them.

@@ -1,1 +1,2 @@
 import resnet_v1_101_flownet_rfcn
+import resnet_v1_101_dcn_flownet_rfcn

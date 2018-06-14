@@ -14,6 +14,7 @@ using shared arrays from the initial module binded with maximum shape.
 import time
 import logging
 import warnings
+import mxnet as mx
 
 from mxnet import context as ctx
 from mxnet.initializer import Uniform, InitDesc
@@ -567,9 +568,15 @@ class Module(BaseModule):
 
         self._params_dirty = True
         if self._update_on_kvstore:
-            _update_params_on_kvstore(self._exec_group.param_arrays,
-                                      self._exec_group.grad_arrays,
-                                      self._kvstore)
+            if int(mx.__version__[0]) == 1:
+                _update_params_on_kvstore(self._exec_group.param_arrays,
+                                          self._exec_group.grad_arrays,
+                                          self._kvstore,
+                                          self._exec_group.param_names)
+            else:
+                _update_params_on_kvstore(self._exec_group.param_arrays,
+                                          self._exec_group.grad_arrays,
+                                          self._kvstore)
         else:
             _update_params(self._exec_group.param_arrays,
                            self._exec_group.grad_arrays,
