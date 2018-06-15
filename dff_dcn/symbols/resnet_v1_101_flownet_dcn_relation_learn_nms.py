@@ -17,7 +17,7 @@ from operator_py.rpn_inv_normalize import *
 from operator_py.tile_as import *
 from resnet_v1_101_rcnn_learn_nms_base import resnet_v1_101_rcnn_learn_nms_base as NMS_UTILS
 
-class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
+class resnet_v1_101_flownet_dcn_relation_learn_nms(Symbol):
 
     def __init__(self):
         """
@@ -893,6 +893,74 @@ class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
             data=rpn_relu, kernel=(1, 1), pad=(0, 0), num_filter=4 * num_anchors, name="rpn_bbox_pred")
         return rpn_cls_score, rpn_bbox_pred
 
+    def attention_module_multi_head(self, roi_feat, position_embedding,
+                                    nongt_dim, fc_dim, feat_dim,
+                                    dim=(1024, 1024, 1024),
+                                    group=16, index=1):
+        """ Attetion module with vectorized version
+
+        Args:
+            roi_feat: [num_rois, feat_dim]
+            position_embedding: [num_rois, nongt_dim, emb_dim]
+            nongt_dim:
+            fc_dim: should be same as group
+            feat_dim: dimension of roi_feat, should be same as dim[2]
+            dim: a 3-tuple of (query, key, output)
+            group:
+            index:
+
+        Returns:
+            output: [num_rois, ovr_feat_dim, output_dim]
+        """
+        dim_group = (dim[0] / group, dim[1] / group, dim[2] / group)
+        nongt_roi_feat = mx.symbol.slice_axis(data=roi_feat, axis=0, begin=0, end=nongt_dim)
+        # [num_rois * nongt_dim, emb_dim]
+        position_embedding_reshape = mx.sym.Reshape(position_embedding, shape=(-3, -2))
+        # position_feat_1, [num_rois * nongt_dim, fc_dim]
+        position_feat_1 = mx.sym.FullyConnected(name='pair_pos_fc1_' + str(index),
+                                                data=position_embedding_reshape,
+                                                num_hidden=fc_dim)
+        position_feat_1_relu = mx.sym.Activation(data=position_feat_1, act_type='relu')
+        # aff_weight, [num_rois, nongt_dim, fc_dim]
+        aff_weight = mx.sym.Reshape(position_feat_1_relu, shape=(-1, nongt_dim, fc_dim))
+        # aff_weight, [num_rois, fc_dim, nongt_dim]
+        aff_weight = mx.sym.transpose(aff_weight, axes=(0, 2, 1))
+
+        # multi head
+        assert dim[0] == dim[1], 'Matrix multiply requires same dimensions!'
+        q_data = mx.sym.FullyConnected(name='query_' + str(index),
+                                       data=roi_feat,
+                                       num_hidden=dim[0])
+        q_data_batch = mx.sym.Reshape(q_data, shape=(-1, group, dim_group[0]))
+        q_data_batch = mx.sym.transpose(q_data_batch, axes=(1, 0, 2))
+        k_data = mx.symbol.FullyConnected(name='key_' + str(index),
+                                          data=nongt_roi_feat,
+                                          num_hidden=dim[1])
+        k_data_batch = mx.sym.Reshape(k_data, shape=(-1, group, dim_group[1]))
+        k_data_batch = mx.sym.transpose(k_data_batch, axes=(1, 0, 2))
+        v_data = nongt_roi_feat
+        # v_data =  mx.symbol.FullyConnected(name='value_'+str(index)+'_'+str(gid), data=roi_feat, num_hidden=dim_group[2])
+        aff = mx.symbol.batch_dot(lhs=q_data_batch, rhs=k_data_batch, transpose_a=False, transpose_b=True)
+        # aff_scale, [group, num_rois, nongt_dim]
+        aff_scale = (1.0 / math.sqrt(float(dim_group[1]))) * aff
+        aff_scale = mx.sym.transpose(aff_scale, axes=(1, 0, 2))
+
+        assert fc_dim == group, 'fc_dim != group'
+        # weighted_aff, [num_rois, fc_dim, nongt_dim]
+        weighted_aff = mx.sym.log(mx.sym.maximum(left=aff_weight, right=1e-6)) + aff_scale
+        aff_softmax = mx.symbol.softmax(data=weighted_aff, axis=2, name='softmax_' + str(index))
+        # [num_rois * fc_dim, nongt_dim]
+        aff_softmax_reshape = mx.sym.Reshape(aff_softmax, shape=(-3, -2))
+        # output_t, [num_rois * fc_dim, feat_dim]
+        output_t = mx.symbol.dot(lhs=aff_softmax_reshape, rhs=v_data)
+        # output_t, [num_rois, fc_dim * feat_dim, 1, 1]
+        output_t = mx.sym.Reshape(output_t, shape=(-1, fc_dim * feat_dim, 1, 1))
+        # linear_out, [num_rois, dim[2], 1, 1]
+        linear_out = mx.symbol.Convolution(name='linear_out_' + str(index), data=output_t,
+                                           kernel=(1, 1), num_filter=dim[2], num_group=fc_dim)
+        output = mx.sym.Reshape(linear_out, shape=(0, 0))
+        return output
+
     def attention_module_nms_multi_head(self,
                                         roi_feat, position_mat, num_rois,
                                         dim=(1024, 1024, 1024), fc_dim=(64, 16), feat_dim=1024,
@@ -1067,13 +1135,31 @@ class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
         deformable_roi_pool = mx.contrib.sym.DeformablePSROIPooling(name='deformable_roi_pool', data=conv_new_1_relu, rois=rois,
                                                                     trans=offset_reshape, group_size=1, pooled_size=7, sample_per_part=4,
                                                                     no_trans=False, part_size=7, output_dim=256, spatial_scale=0.0625, trans_std=0.1)
+
+        nongt_dim = cfg.TRAIN.RPN_POST_NMS_TOP_N 
+        sliced_rois = mx.sym.slice_axis(rois, axis=1, begin=1, end=None)
+        # [num_rois, nongt_dim, 4]
+        position_matrix = self.extract_position_matrix(sliced_rois, nongt_dim=nongt_dim)
+        # [num_rois, nongt_dim, 64]
+        position_embedding = self.extract_position_embedding(position_matrix, feat_dim=64)
+
         # 2 fc
         fc_new_1 = mx.symbol.FullyConnected(name='fc_new_1', data=deformable_roi_pool, num_hidden=1024)
-        fc_all_1 = fc_new_1
+        attention_1 = self.attention_module_multi_head(fc_new_1, position_embedding,
+                                               nongt_dim=nongt_dim, fc_dim=16, feat_dim=1024,
+                                               index=1, group=16,
+                                               dim=(1024, 1024, 1024))
+
+        fc_all_1 = fc_new_1 + attention_1
         fc_all_1_relu = mx.sym.Activation(data=fc_all_1, act_type='relu', name='fc_all_1_relu')
 
         fc_new_2 = mx.symbol.FullyConnected(name='fc_new_2', data=fc_all_1_relu, num_hidden=1024)
-        fc_all_2 = fc_new_2
+        attention_2 = self.attention_module_multi_head(fc_new_2, position_embedding,
+                                               nongt_dim=nongt_dim, fc_dim=16, feat_dim=1024,
+                                               index=2, group=16,
+                                               dim=(1024, 1024, 1024))
+
+        fc_all_2 = fc_new_2 + attention_2
         fc_all_2_relu = mx.sym.Activation(data=fc_all_2, act_type='relu', name='fc_all_2_relu')
 
         # cls_score/bbox_pred
@@ -1213,7 +1299,7 @@ class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
         self.sym = mx.sym.Group(output_sym_list)
         return self.sym
 
-    def learning_nms(self, cfg, cls_score, bbox_pred, rois, im_info):
+    def learn_nms(self, cfg, cls_score, bbox_pred, rois, im_info):
 
         ######################### learn nms #########################
         # notice that all implementation of python ops try to leave batch idx support for multi-batch
@@ -1326,13 +1412,32 @@ class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
         deformable_roi_pool = mx.contrib.sym.DeformablePSROIPooling(name='deformable_roi_pool', data=conv_new_1_relu, rois=rois,
                                                                     trans=offset_reshape, group_size=1, pooled_size=7, sample_per_part=4,
                                                                     no_trans=False, part_size=7, output_dim=256, spatial_scale=0.0625, trans_std=0.1)
+
+        nongt_dim = cfg.TEST.RPN_POST_NMS_TOP_N 
+        sliced_rois = mx.sym.slice_axis(rois, axis=1, begin=1, end=None)
+        # [num_rois, nongt_dim, 4]
+        position_matrix = self.extract_position_matrix(sliced_rois, nongt_dim=nongt_dim)
+        # [num_rois, nongt_dim, 64]
+        position_embedding = self.extract_position_embedding(position_matrix, feat_dim=64)
+
         # 2 fc
         fc_new_1 = mx.symbol.FullyConnected(name='fc_new_1', data=deformable_roi_pool, num_hidden=1024)
-        fc_all_1 = fc_new_1
+
+        attention_1 = self.attention_module_multi_head(fc_new_1, position_embedding,
+                                               nongt_dim=nongt_dim, fc_dim=16, feat_dim=1024,
+                                               index=1, group=16,
+                                               dim=(1024, 1024, 1024))
+
+        fc_all_1 = fc_new_1 + attention_1
         fc_all_1_relu = mx.sym.Activation(data=fc_all_1, act_type='relu', name='fc_all_1_relu')
 
         fc_new_2 = mx.symbol.FullyConnected(name='fc_new_2', data=fc_all_1_relu, num_hidden=1024)
-        fc_all_2 = fc_new_2
+        attention_2 = self.attention_module_multi_head(fc_new_2, position_embedding,
+                                               nongt_dim=nongt_dim, fc_dim=16, feat_dim=1024,
+                                               index=2, group=16,
+                                               dim=(1024, 1024, 1024))
+
+        fc_all_2 = fc_new_2 + attention_2
         fc_all_2_relu = mx.sym.Activation(data=fc_all_2, act_type='relu', name='fc_all_2_relu')
 
         # cls_score/bbox_pred
@@ -1343,7 +1448,7 @@ class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
         # group output
         output_sym_list = [data_key, feat_key, conv_feat, rois, cls_prob, bbox_pred]
 
-        sorted_bbox, sorted_score, nms_final_score = learning_nms(self, cfg, cls_score, bbox_pred, rois, im_info)
+        sorted_bbox, sorted_score, nms_final_score = self.learn_nms(cfg, cls_score, bbox_pred, rois, im_info)
         output_sym_list = output_sym_list.extend([sorted_bbox, sorted_score, nms_final_score])
         self.sym = mx.sym.Group(output_sym_list)
         return self.sym
@@ -1411,13 +1516,32 @@ class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
         deformable_roi_pool = mx.contrib.sym.DeformablePSROIPooling(name='deformable_roi_pool', data=conv_new_1_relu, rois=rois,
                                                                     trans=offset_reshape, group_size=1, pooled_size=7, sample_per_part=4,
                                                                     no_trans=False, part_size=7, output_dim=256, spatial_scale=0.0625, trans_std=0.1)
+
+        nongt_dim = cfg.TEST.RPN_POST_NMS_TOP_N 
+        sliced_rois = mx.sym.slice_axis(rois, axis=1, begin=1, end=None)
+        # [num_rois, nongt_dim, 4]
+        position_matrix = self.extract_position_matrix(sliced_rois, nongt_dim=nongt_dim)
+        # [num_rois, nongt_dim, 64]
+        position_embedding = self.extract_position_embedding(position_matrix, feat_dim=64)
+
         # 2 fc
         fc_new_1 = mx.symbol.FullyConnected(name='fc_new_1', data=deformable_roi_pool, num_hidden=1024)
-        fc_all_1 = fc_new_1
+
+        attention_1 = self.attention_module_multi_head(fc_new_1, position_embedding,
+                                               nongt_dim=nongt_dim, fc_dim=16, feat_dim=1024,
+                                               index=1, group=16,
+                                               dim=(1024, 1024, 1024))
+
+        fc_all_1 = fc_new_1 + attention_1
         fc_all_1_relu = mx.sym.Activation(data=fc_all_1, act_type='relu', name='fc_all_1_relu')
 
         fc_new_2 = mx.symbol.FullyConnected(name='fc_new_2', data=fc_all_1_relu, num_hidden=1024)
-        fc_all_2 = fc_new_2
+        attention_2 = self.attention_module_multi_head(fc_new_2, position_embedding,
+                                               nongt_dim=nongt_dim, fc_dim=16, feat_dim=1024,
+                                               index=2, group=16,
+                                               dim=(1024, 1024, 1024))
+
+        fc_all_2 = fc_new_2 + attention_2
         fc_all_2_relu = mx.sym.Activation(data=fc_all_2, act_type='relu', name='fc_all_2_relu')
 
         # cls_score/bbox_pred
@@ -1429,7 +1553,7 @@ class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
         # group output
         output_sym_list = [rois, cls_prob, bbox_pred]
 
-        sorted_bbox, sorted_score, nms_final_score = learning_nms(self, cfg, cls_score, bbox_pred, rois, im_info)
+        sorted_bbox, sorted_score, nms_final_score = self.learn_nms(cfg, cls_score, bbox_pred, rois, im_info)
         output_sym_list = output_sym_list.extend([sorted_bbox, sorted_score, nms_final_score])
 
         self.sym = mx.sym.Group(output_sym_list)
@@ -1473,6 +1597,25 @@ class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
         arg_params['feat_conv_3x3_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['feat_conv_3x3_weight'])
         arg_params['feat_conv_3x3_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['feat_conv_3x3_bias'])
 
+    def init_weight_attention_multi_head(self, cfg, arg_params, aux_params, index=1):
+        arg_params['pair_pos_fc1_' + str(index) + '_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict[
+            'pair_pos_fc1_' + str(index) + '_weight'])
+        arg_params['pair_pos_fc1_' + str(index) + '_bias'] = mx.nd.zeros(
+            shape=self.arg_shape_dict['pair_pos_fc1_' + str(index) + '_bias'])
+        # batch mode
+        arg_params['query_' + str(index) + '_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict[
+            'query_' + str(index) + '_weight'])
+        arg_params['query_' + str(index) + '_bias'] = mx.nd.zeros(
+            shape=self.arg_shape_dict['query_' + str(index) + '_bias'])
+        arg_params['key_' + str(index) + '_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict[
+            'key_' + str(index) + '_weight'])
+        arg_params['key_' + str(index) + '_bias'] = mx.nd.zeros(
+            shape=self.arg_shape_dict['key_' + str(index) + '_bias'])
+        arg_params['linear_out_' + str(index) + '_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict[
+            'linear_out_' + str(index) + '_weight'])
+        arg_params['linear_out_' + str(index) + '_bias'] = mx.nd.zeros(
+            shape=self.arg_shape_dict['linear_out_' + str(index) + '_bias'])
+
     def init_weight_rcnn(self, cfg, arg_params, aux_params):
         arg_params['res5a_branch2b_offset_weight'] = mx.nd.zeros(shape=self.arg_shape_dict['res5a_branch2b_offset_weight'])
         arg_params['res5a_branch2b_offset_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['res5a_branch2b_offset_bias'])
@@ -1493,6 +1636,9 @@ class resnet_v1_101_flownet_dcn_relation_learning_nms(Symbol):
         arg_params['cls_score_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['cls_score_bias'])
         arg_params['bbox_pred_weight'] = mx.random.normal(0, 0.01, shape=self.arg_shape_dict['bbox_pred_weight'])
         arg_params['bbox_pred_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['bbox_pred_bias'])
+
+        self.init_weight_attention_multi_head(cfg, arg_params, aux_params, index=1)
+        self.init_weight_attention_multi_head(cfg, arg_params, aux_params, index=2)
         self.init_weight_resnet(cfg, arg_params, aux_params)
 
     def init_weight_rpn(self, cfg, arg_params, aux_params):
