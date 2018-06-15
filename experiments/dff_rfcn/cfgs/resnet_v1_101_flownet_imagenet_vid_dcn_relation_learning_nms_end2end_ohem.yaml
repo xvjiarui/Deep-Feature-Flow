@@ -1,8 +1,8 @@
 ---
 MXNET_VERSION: "mxnet"
 output_path: "./output/dff_dcn/imagenet_vid"
-symbol: resnet_v1_101_flownet_dcn
-gpus: '4,5,6,7'
+symbol: resnet_v1_101_flownet_dcn_relation_learning_nms
+gpus: '0,1,2,3'
 CLASS_AGNOSTIC: true
 SCALES:
 - 600
@@ -62,7 +62,7 @@ TRAIN:
   warmup: false
   begin_epoch: 0
   end_epoch: 2
-  model_prefix: 'dff_dcn_vid'
+  model_prefix: 'dff_dcn_relation_learning_nms_vid'
   # whether resume training
   RESUME: false
   # whether flip image
@@ -128,6 +128,11 @@ TRAIN:
   - 0.1
   - 0.2
   - 0.2
+  # Learning NMS
+  LEARN_NMS: true
+  FIRST_N: 100
+  JOINT_TRAINING: true
+
 TEST:
   # use rpn to generate proposal
   HAS_RPN: true
@@ -142,3 +147,5 @@ TEST:
   # RCNN nms
   NMS: 0.3
   test_epoch: 2
+  LEARN_NMS: true
+  FIRST_N: 100

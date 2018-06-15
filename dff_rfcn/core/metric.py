@@ -174,3 +174,116 @@ class RCNNL1LossMetric(mx.metric.EvalMetric):
 
         self.sum_metric += np.sum(bbox_loss)
         self.num_inst += num_inst
+        
+class NMSLossMetric(mx.metric.EvalMetric):
+    def __init__(self, cfg, name):
+        assert cfg.TRAIN.LEARN_NMS, 'config set learn nms to be false'
+        assert name in ['pos', 'neg'], 'only for nms_pos/neg_loss'
+        super(NMSLossMetric, self).__init__('NMSLoss_' + name)
+        # self._num_fg_classes = cfg.dataset.NUM_CLASSES - 1
+        self._offset = ['pos', 'neg'].index(name)
+
+    def update(self, labels, preds):
+        # for x in preds:
+        #     nms_loss_list.append(x.asnumpy())
+        # if self._debug:
+        #     nms_multi_target = preds[-4].asnumpy()
+        #     if self._offset == 0:
+        #         print self.name, 'pos:', np.sum(nms_multi_target[1:, :, :])
+        #     else:
+        #         print self.name, 'neg:', np.size(nms_multi_target[1:, :, :]) - np.sum(nms_multi_target[1:, :, :])
+
+        nms_loss = preds[-2 + self._offset].asnumpy()
+
+        self.sum_metric += np.sum(nms_loss)
+        self.num_inst += 1
+
+
+# v0.10.0 support update_dict, but v0.9.5 does not support
+class NMSAccMetric(mx.metric.EvalMetric):
+    def __init__(self, cfg):
+        assert cfg.TRAIN.LEARN_NMS, 'config set learn nms to be false'
+        self._suffixes=['pos', 'neg']
+        super(NMSAccMetric, self).__init__('NMSAcc')
+
+    def reset(self):
+        """Resets the internal evaluation result to initial state."""
+        self.num_inst = [0, 0]
+        self.sum_metric = [0.0, 0.0]
+
+    def get(self):
+        name = []
+        value = []
+        for idx, num_inst in enumerate(self.num_inst):
+            name.append(self.name + '_' +self._suffixes[idx])
+            if num_inst == 0:
+                value.append(float('nan'))
+            else:
+                value.append(self.sum_metric[idx] / self.num_inst[idx])
+        return name, value
+
+    def update(self, labels, preds):
+        nms_multi_target = preds[-4].asnumpy()
+        nms_conditional_score = preds[-3].asnumpy()
+
+        # pos
+        valid_mask = nms_multi_target > 0.5
+        valid_score = (nms_conditional_score > 0.5)
+        num_inst = np.sum(valid_mask)
+        num_true = np.sum(valid_mask * valid_score)
+        self.sum_metric[0] += num_true
+        self.num_inst[0] += num_inst
+        # neg
+        valid_mask = nms_multi_target < 0.5
+        valid_score = (nms_conditional_score < 0.5)
+        num_inst = np.sum(valid_mask)
+        num_true = np.sum(valid_mask * valid_score)
+        self.sum_metric[1] += num_true
+        self.num_inst[1] += num_inst
+
+
+class NMSAccValidMetric(mx.metric.EvalMetric):
+    def __init__(self, cfg):
+        assert cfg.TRAIN.LEARN_NMS, 'config set learn nms to be false'
+        assert cfg.TRAIN.INSTANCE_WEIGHT, 'config set instance weight to be false'
+        self._suffixes=['pos', 'neg']
+        super(NMSAccValidMetric, self).__init__('NMSAccValid')
+
+    def reset(self):
+        """Resets the internal evaluation result to initial state."""
+        self.num_inst = [0, 0]
+        self.sum_metric = [0.0, 0.0]
+
+    def get(self):
+        name = []
+        value = []
+        for idx, num_inst in enumerate(self.num_inst):
+            name.append(self.name + '_' +self._suffixes[idx])
+            if num_inst == 0:
+                value.append(float('nan'))
+            else:
+                value.append(self.sum_metric[idx] / self.num_inst[idx])
+        return name, value
+
+    def update(self, labels, preds):
+        nms_multi_target = preds[-4].asnumpy()
+        nms_conditional_score = preds[-3].asnumpy()
+        instance_weight = preds[-5].asnumpy()
+        instance_mask = (instance_weight > 1e-8)
+
+        # pos
+        valid_mask = nms_multi_target > 0.5
+        valid_mask = valid_mask * instance_mask
+        valid_score = (nms_conditional_score > 0.5)
+        num_inst = np.sum(valid_mask)
+        num_true = np.sum(valid_mask * valid_score)
+        self.sum_metric[0] += num_true
+        self.num_inst[0] += num_inst
+        # neg
+        valid_mask = nms_multi_target < 0.5
+        valid_mask = valid_mask * instance_mask
+        valid_score = (nms_conditional_score < 0.5)
+        num_inst = np.sum(valid_mask)
+        num_true = np.sum(valid_mask * valid_score)
+        self.sum_metric[1] += num_true
+        self.num_inst[1] += num_inst

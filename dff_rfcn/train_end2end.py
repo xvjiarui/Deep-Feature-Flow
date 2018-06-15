@@ -129,16 +129,24 @@ def train_net(args, ctx, pretrained, pretrained_flow, epoch, prefix, begin_epoch
 
     # decide training params
     # metric
-    rpn_eval_metric = metric.RPNAccMetric()
-    rpn_cls_metric = metric.RPNLogLossMetric()
-    rpn_bbox_metric = metric.RPNL1LossMetric()
     eval_metric = metric.RCNNAccMetric(config)
     cls_metric = metric.RCNNLogLossMetric(config)
     bbox_metric = metric.RCNNL1LossMetric(config)
     eval_metrics = mx.metric.CompositeEvalMetric()
-    # rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric, eval_metric, cls_metric, bbox_metric
-    for child_metric in [rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric, eval_metric, cls_metric, bbox_metric]:
+
+    for child_metric in [eval_metric, cls_metric, bbox_metric]:
         eval_metrics.add(child_metric)
+    if config.TRAIN.JOINT_TRAINING or (not config.TRAIN.LEARN_NMS):
+        rpn_eval_metric = metric.RPNAccMetric()
+        rpn_cls_metric = metric.RPNLogLossMetric()
+        rpn_bbox_metric = metric.RPNL1LossMetric()
+        for child_metric in [rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric]:
+            eval_metrics.add(child_metric)
+    if config.TRAIN.LEARN_NMS:
+        eval_metrics.add(metric.NMSLossMetric(config, 'pos'))
+        eval_metrics.add(metric.NMSLossMetric(config, 'neg'))
+        eval_metrics.add(metric.NMSAccMetric(config))
+
     # callback
     batch_end_callback = [callback.Speedometer(train_data.batch_size, frequent=args.frequent)]
     
