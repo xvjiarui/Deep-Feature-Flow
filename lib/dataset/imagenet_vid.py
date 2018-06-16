@@ -58,6 +58,7 @@ class ImageNetVID(IMDB):
         self.load_image_set_index()
         self.num_images = len(self.image_set_index)
         self.use_philly = use_philly
+        print self.use_philly
         print 'num_images', self.num_images
 
     def load_image_set_index(self):
@@ -86,10 +87,14 @@ class ImageNetVID(IMDB):
         :param index: index of a specific image
         :return: full path of this image
         """
-        if self.det_vid == 'DET':
-            image_file = os.path.join(self.data_path, 'Data', 'DET', index + '.JPEG')
+        if self.use_philly:
+            data_name = 'Data.zip@/Data'
         else:
-            image_file = os.path.join(self.data_path, 'Data', 'VID', index + '.JPEG')
+            data_name = 'Data'
+        if self.det_vid == 'DET':
+            image_file = os.path.join(self.data_path, data_name, 'DET', index + '.JPEG')
+        else:
+            image_file = os.path.join(self.data_path, data_name, 'VID', index + '.JPEG')
 
         # assert os.path.exists(image_file), 'Path does not exist: {}'.format(image_file)
         return image_file
@@ -130,10 +135,15 @@ class ImageNetVID(IMDB):
             roi_rec['frame_seg_id'] = self.frame_seg_id[iindex]
             roi_rec['frame_seg_len'] = self.frame_seg_len[iindex]
 
-        if self.det_vid == 'DET':
-            filename = os.path.join(self.data_path, 'Annotations', 'DET', index + '.xml')
+        if self.use_philly:
+            annotation_name = 'Annotations.zip@/Annotations'
         else:
-            filename = os.path.join(self.data_path, 'Annotations', 'VID', index + '.xml')
+            annotation_name= 'Annotations'
+
+        if self.det_vid == 'DET':
+            filename = os.path.join(self.data_path, annotation_name, 'DET', index + '.xml')
+        else:
+            filename = os.path.join(self.data_path, annotation_name, 'VID', index + '.xml')
 
         tree = ET.parse(filename)
         size = tree.find('size')

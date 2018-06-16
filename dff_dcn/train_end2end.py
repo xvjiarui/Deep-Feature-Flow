@@ -107,7 +107,7 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
         arg_params, aux_params = load_param(prefix, begin_epoch, convert=True)
     else:
         arg_params, aux_params = load_param(os.path.join(pretrained_dir, pretrained_resnet), epoch, convert=True)
-        arg_params_flow, aux_params_flow = load_param(os.path.join(pretrained_dir, pretrained_flow), convert=True)
+        arg_params_flow, aux_params_flow = load_param(os.path.join(pretrained_dir, pretrained_flow), epoch, convert=True)
         arg_params.update(arg_params_flow)
         aux_params.update(aux_params_flow)
         sym_instance.init_weight(config, arg_params, aux_params)

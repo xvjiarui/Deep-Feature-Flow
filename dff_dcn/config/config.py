@@ -202,3 +202,5 @@ def update_philly_config(model_dir, data_dir):
     
     config.output_path = _update_to_abs(model_dir, config.output_path)
     config.dataset.dataset_path = _update_to_abs(data_dir, config.dataset.dataset_path)
+    config.dataset.root_path = _update_to_abs(data_dir, config.dataset.root_path)
+    config.network.pretrained_dir = _update_to_abs(data_dir, config.network.pretrained_dir)

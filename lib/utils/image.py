@@ -24,7 +24,7 @@ def get_image(roidb, config):
     for i in range(num_images):
         roi_rec = roidb[i]
         image_path = roi_rec['image']
-        assert os.path.exists(roi_rec['image']), '%s does not exist'.format(roi_rec['image'])
+        assert os.path.exists(roi_rec['image']), '{} does not exist'.format(roi_rec['image'])
         if '.zip@' in image_path:
             im = phillyzip.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         else:
@@ -63,13 +63,17 @@ def get_pair_image(roidb, config):
         roi_rec = roidb[i]
 
         eq_flag = 0 # 0 for unequal, 1 for equal
-        assert os.path.exists(roi_rec['image']), '%s does not exist'.format(roi_rec['image'])
-        im = cv2.imread(roi_rec['image'], cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        image_path = roi_rec['image']
+        assert os.path.exists(roi_rec['image']), '{} does not exist'.format(roi_rec['image'])
+        if '.zip@' in image_path:
+            im = phillyzip.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        else:
+            im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
 
         if roi_rec.has_key('pattern'):
             ref_id = min(max(roi_rec['frame_seg_id'] + np.random.randint(config.TRAIN.MIN_OFFSET, config.TRAIN.MAX_OFFSET+1), 0),roi_rec['frame_seg_len']-1)
             ref_image = roi_rec['pattern'] % ref_id
-            assert os.path.exists(ref_image), '%s does not exist'.format(ref_image)
+            assert os.path.exists(ref_image), '{} does not exist'.format(ref_image)
             ref_im = cv2.imread(ref_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
             if ref_id == roi_rec['frame_seg_id']:
                 eq_flag = 1
