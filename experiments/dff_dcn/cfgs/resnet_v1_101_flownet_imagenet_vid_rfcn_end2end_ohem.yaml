@@ -11,8 +11,9 @@ default:
   frequent: 100
   kvstore: device
 network:
-  pretrained: "./model/pretrained_model/resnet_v1_101"
-  pretrained_flow: "./model/pretrained_model/flownet"
+  pretrained_dir: "./model/pretrained_model"
+  pretrained_resnet: "resnet_v1_101"
+  pretrained_flow: "flownet"
   pretrained_epoch: 0
   PIXEL_MEANS:
   - 103.06
