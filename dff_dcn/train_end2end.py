@@ -21,7 +21,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train R-FCN network')
     # general
     parser.add_argument('--cfg', help='experiment configure file name', required=True, type=str)
-    parser.add_argument('--usePhilly', help='experiment is on the philly', type=bool, action='store_true')
+    parser.add_argument('--usePhilly', help='experiment is on the philly', action='store_true')
 
     args, rest = parser.parse_known_args()
     # update config
@@ -160,7 +160,7 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
     means = np.tile(np.array(config.TRAIN.BBOX_MEANS), 2 if config.CLASS_AGNOSTIC else config.dataset.NUM_CLASSES)
     stds = np.tile(np.array(config.TRAIN.BBOX_STDS), 2 if config.CLASS_AGNOSTIC else config.dataset.NUM_CLASSES)
     epoch_end_callback = [mx.callback.module_checkpoint(mod, prefix, period=1, save_optimizer_states=True), callback.do_checkpoint(prefix, means, stds)]
-    batch_end_callback = batch_end_callback.extend(epoch_end_callback)
+    
     # decide learning rate
     base_lr = lr
     lr_factor = config.TRAIN.lr_factor
