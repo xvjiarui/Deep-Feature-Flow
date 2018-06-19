@@ -112,26 +112,25 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin
 
 
     # load and initialize params
+    params_loaded = False
     if config.TRAIN.RESUME:
         arg_params, aux_params = load_param(prefix, begin_epoch, convert=True)
         mod._preload_opt_states = '%s-%04d.states'%(prefix, begin_epoch)
         print('continue training from ', begin_epoch)
         logger.info('continue training from ', begin_epoch)
     elif config.TRAIN.AUTO_RESUME:
-        for cur_epoch in range(config.TRAIN.end_epoch, config.TRAIN.begin_epoch + 1, -1):
-            params_filename = '{}-{:04d}.params'.format(prefix, cur_epoch-1)
-            states_filename = '{}-{:04d}.states'.format(prefix, cur_epoch-1)
+        for cur_epoch in range(config.TRAIN.end_epoch-1, config.TRAIN.begin_epoch, -1):
+            params_filename = '{}-{:04d}.params'.format(prefix, cur_epoch)
+            states_filename = '{}-{:04d}.states'.format(prefix, cur_epoch)
             if os.path.exists(params_filename) and os.path.exists(states_filename):
                 config.TRAIN.begin_epoch = cur_epoch
-                arg_params, aux_params = load_param(prefix, cur_epoch-1, convert=True)
+                arg_params, aux_params = load_param(prefix, cur_epoch, convert=True)
                 mod._preload_opt_states = states_filename
                 print('auto continue training from {}, {}'.format(params_filename, states_filename))
                 logger.info('auto continue training from {}, {}'.format(params_filename, states_filename))
+                params_loaded = True
                 break
-        print("no auto resume checkpoint, load pretrained model")
-        logger.info("no auto resume checkpoint, load pretrained model")
-        arg_params, aux_params = load_param(os.path.join(pretrained_dir, pretrained_resnet), epoch, convert=True)
-    else:
+    if not params_loaded:
         arg_params, aux_params = load_param(os.path.join(pretrained_dir, pretrained_resnet), epoch, convert=True)
 
 
