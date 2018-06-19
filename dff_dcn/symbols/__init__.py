@@ -1,5 +1,4 @@
 import resnet_v1_101_flownet_rfcn
-import resnet_v1_101_dcn_flownet_rfcn
 import resnet_v1_101_flownet_dcn
 import resnet_v1_101_flownet_dcn_learn_nms
 import resnet_v1_101_flownet_dcn_relation_learn_nms
