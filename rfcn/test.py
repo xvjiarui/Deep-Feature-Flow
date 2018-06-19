@@ -20,6 +20,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Test a R-FCN network')
     # general
     parser.add_argument('--cfg', help='experiment configure file name', required=True, type=str)
+    parser.add_argument('--usePhilly', help='experiment is on the philly', action='store_true')
 
     args, rest = parser.parse_known_args()
     update_config(args.cfg)
