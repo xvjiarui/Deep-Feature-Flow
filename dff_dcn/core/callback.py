@@ -53,7 +53,7 @@ class PhillyProgressCallback(object):
     
     def __call__(self, param):
         if self.cur_iter % self.frequent == 0:
-            print('\nPROGRESS: {:.2f}%\n'.format(100 * self.cur_iter / self.total_iter))
+            print('\nPROGRESS: {:.2f}%\n'.format(100.0 * self.cur_iter / self.total_iter))
         self.cur_iter += 1
 
 
