@@ -20,6 +20,7 @@ using shared arrays from the initial module binded with maximum shape.
 import time
 import logging
 import warnings
+import mxnet as mx
 
 from mxnet import context as ctx
 from mxnet.initializer import Uniform, InitDesc
