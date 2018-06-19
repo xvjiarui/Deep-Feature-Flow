@@ -153,7 +153,7 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin
         eval_metrics.add(child_metric)
 
     # callback
-    batch_end_callback = callback.Speedometer(train_data.batch_size, frequent=args.frequent)
+    batch_end_callback = [callback.Speedometer(train_data.batch_size, frequent=args.frequent)]
 
     if config.USE_PHILLY:
         total_iter = (config.TRAIN.end_epoch - config.TRAIN.begin_epoch) * len(roidb) / input_batch_size
