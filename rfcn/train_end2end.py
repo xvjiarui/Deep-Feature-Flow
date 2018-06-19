@@ -15,7 +15,7 @@ import logging
 import pprint
 import os
 import sys
-from config.config import config, update_config
+from config.config import config, update_config, update_philly_config
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train R-FCN network')
