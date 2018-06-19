@@ -104,20 +104,6 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
     pprint.pprint(data_shape_dict)
     sym_instance.infer_shape(data_shape_dict)
 
-    # load and initialize params
-    if config.TRAIN.RESUME:
-        print('continue training from ', begin_epoch)
-        arg_params, aux_params = load_param(prefix, begin_epoch, convert=True)
-    else:
-        arg_params, aux_params = load_param(os.path.join(pretrained_dir, pretrained_resnet), epoch, convert=True)
-        arg_params_flow, aux_params_flow = load_param(os.path.join(pretrained_dir, pretrained_flow), epoch, convert=True)
-        arg_params.update(arg_params_flow)
-        aux_params.update(aux_params_flow)
-        sym_instance.init_weight(config, arg_params, aux_params)
-
-    # check parameter shapes
-    sym_instance.check_parameter_shapes(arg_params, aux_params, data_shape_dict)
-
     # create solver
     fixed_param_prefix = config.network.FIXED_PARAMS
     data_names = [k[0] for k in train_data.provide_data_single]
@@ -127,8 +113,38 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
                         logger=logger, context=ctx, max_data_shapes=[max_data_shape for _ in range(batch_size)],
                         max_label_shapes=[max_label_shape for _ in range(batch_size)], fixed_param_prefix=fixed_param_prefix)
 
+    # load and initialize params
     if config.TRAIN.RESUME:
+        arg_params, aux_params = load_param(prefix, begin_epoch, convert=True)
         mod._preload_opt_states = '%s-%04d.states'%(prefix, begin_epoch)
+        print('continue training from ', begin_epoch)
+        logger.info('continue training from ', begin_epoch)
+    elif config.TRAIN.AUTO_RESUME:
+        for cur_epoch in range(config.TRAIN.end_epoch, config.TRAIN.begin_epoch + 1, -1):
+            params_filename = '{}-{:04d}.params'.format(prefix, cur_epoch-1)
+            states_filename = '{}-{:04d}.states'.format(prefix, cur_epoch-1)
+            if os.path.exists(params_filename) and os.path.exists(states_filename):
+                config.TRAIN.begin_epoch = cur_epoch
+                arg_params, aux_params = load_param(prefix, cur_epoch-1, convert=True)
+                mod._preload_opt_states = states_filename
+                print('auto continue training from {}, {}'.format(params_filename, states_filename))
+                logger.info('auto continue training from {}, {}'.format(params_filename, states_filename))
+                break
+        print("no auto resume checkpoint, load pretrained model")
+        logger.info("no auto resume checkpoint, load pretrained model")
+        arg_params, aux_params = load_param(os.path.join(pretrained_dir, pretrained_resnet), epoch, convert=True)
+        arg_params_flow, aux_params_flow = load_param(os.path.join(pretrained_dir, pretrained_flow), epoch, convert=True)
+        arg_params.update(arg_params_flow)
+        aux_params.update(aux_params_flow)
+    else:
+        arg_params, aux_params = load_param(os.path.join(pretrained_dir, pretrained_resnet), epoch, convert=True)
+        arg_params_flow, aux_params_flow = load_param(os.path.join(pretrained_dir, pretrained_flow), epoch, convert=True)
+        arg_params.update(arg_params_flow)
+        aux_params.update(aux_params_flow)
+
+    sym_instance.init_weight(config, arg_params, aux_params)
+    # check parameter shapes
+    sym_instance.check_parameter_shapes(arg_params, aux_params, data_shape_dict)
 
     # decide training params
     # metric

@@ -58,7 +58,6 @@ class ImageNetVID(IMDB):
         self.load_image_set_index()
         self.num_images = len(self.image_set_index)
         self.use_philly = use_philly
-        print self.use_philly
         print 'num_images', self.num_images
 
     def load_image_set_index(self):

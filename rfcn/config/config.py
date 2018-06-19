@@ -77,6 +77,8 @@ config.TRAIN.nms_pos_scale = 4.0
 
 # whether resume training
 config.TRAIN.RESUME = False
+# whether auto resume training
+config.TRAIN.AUTO_RESUME = True
 # whether flip image
 config.TRAIN.FLIP = True
 # whether shuffle image
