@@ -24,6 +24,14 @@ def parse_args():
     args, rest = parser.parse_known_args()
     update_config(args.cfg)
 
+    # modfication for philly
+    config.USE_PHILLY = args.usePhilly
+    if config.USE_PHILLY:
+        parser.add_argument('--dataDir', help='input directory for Philly jobs', required=True, type=str)
+        parser.add_argument('--modelDir', help='output directory for Philly jobs', required=True, type=str)
+        args, rest = parser.parse_known_args()
+        update_philly_config(args.modelDir, args.dataDir)
+
     # rcnn
     parser.add_argument('--vis', help='turn on visualization', action='store_true')
     parser.add_argument('--ignore_cache', help='ignore cached results boxes', action='store_true')
