@@ -1,9 +1,11 @@
 ---
 MXNET_VERSION: "mxnet"
-output_path: "./output/rfcn/imagenet_vid"
-symbol: resnet_v1_101_rfcn
+output_path: "./output/dff_rfcn/imagenet_vid"
+symbol: resnet_v1_101_flownet_drfcn
 gpus: '0,1,2,3,4,5,6,7'
+# gpus: '4,5,6,7'
 CLASS_AGNOSTIC: true
+USE_PHILLY: false
 SCALES:
 - 600
 - 1000
@@ -13,6 +15,7 @@ default:
 network:
   pretrained_dir: "./model/pretrained_model"
   pretrained_resnet: "resnet_v1_101"
+  pretrained_flow: "flownet"
   pretrained_epoch: 0
   PIXEL_MEANS:
   - 103.06
@@ -54,7 +57,7 @@ dataset:
   dataset_path: "./data/ILSVRC2015"
   image_set: DET_train_30classes+VID_train_15frames
   root_path: "./data"
-  test_image_set: VID_val_frames
+  test_image_set: VID_val_videos
   proposal: rpn
 TRAIN:
   lr: 0.00025
@@ -62,7 +65,7 @@ TRAIN:
   warmup: false
   begin_epoch: 0
   end_epoch: 2
-  model_prefix: 'rfcn_vid'
+  model_prefix: 'dff_rfcn_vid'
   # whether resume training
   RESUME: false
   # whether flip image

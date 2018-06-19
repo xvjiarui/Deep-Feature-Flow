@@ -4,6 +4,7 @@
 # Copyright (c) 2017 Microsoft
 # Licensed under The Apache-2.0 License [see LICENSE for details]
 # Modified by Yuwen Xiong
+# Modified by Jiarui XU
 # --------------------------------------------------------
 
 import _init_paths
@@ -15,7 +16,7 @@ import logging
 import pprint
 import os
 import sys
-from config.config import config, update_config
+from config.config import config, update_config, update_philly_config
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train R-FCN network')
@@ -59,7 +60,7 @@ from utils.PrefetchingIter import PrefetchingIter
 from utils.lr_scheduler import WarmupMultiFactorScheduler
 
 
-def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin_epoch, end_epoch, lr, lr_step):
+def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epoch, prefix, begin_epoch, end_epoch, lr, lr_step):
     logger, final_output_path = create_logger(config.output_path, args.cfg, config.dataset.image_set)
     prefix = os.path.join(final_output_path, prefix)
 
@@ -80,7 +81,7 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin
     # load dataset and prepare imdb for training
     image_sets = [iset for iset in config.dataset.image_set.split('+')]
     roidbs = [load_gt_roidb(config.dataset.dataset, image_set, config.dataset.root_path, config.dataset.dataset_path,
-                            flip=config.TRAIN.FLIP)
+                            flip=config.TRAIN.FLIP, use_philly = config.USE_PHILLY)
               for image_set in image_sets]
     roidb = merge_roidb(roidbs)
     roidb = filter_roidb(roidb, config)
@@ -92,10 +93,12 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin
                               bbox_std=config.network.ANCHOR_STDS)
 
     # infer max shape
-    max_data_shape = [('data', (config.TRAIN.BATCH_IMAGES, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES])))]
+    max_data_shape = [('data', (config.TRAIN.BATCH_IMAGES, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES]))),
+                      ('data_ref', (config.TRAIN.BATCH_IMAGES, 3, max([v[0] for v in config.SCALES]), max([v[1] for v in config.SCALES]))),
+                      ('eq_flag', (1,))]
     max_data_shape, max_label_shape = train_data.infer_shape(max_data_shape)
     max_data_shape.append(('gt_boxes', (config.TRAIN.BATCH_IMAGES, 100, 5)))
-    print('providing maximum shape', max_data_shape, max_label_shape)
+    print 'providing maximum shape', max_data_shape, max_label_shape
 
     data_shape_dict = dict(train_data.provide_data_single + train_data.provide_label_single)
     pprint.pprint(data_shape_dict)
@@ -107,6 +110,9 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin
         arg_params, aux_params = load_param(prefix, begin_epoch, convert=True)
     else:
         arg_params, aux_params = load_param(os.path.join(pretrained_dir, pretrained_resnet), epoch, convert=True)
+        arg_params_flow, aux_params_flow = load_param(os.path.join(pretrained_dir, pretrained_flow), epoch, convert=True)
+        arg_params.update(arg_params_flow)
+        aux_params.update(aux_params_flow)
         sym_instance.init_weight(config, arg_params, aux_params)
 
     # check parameter shapes
@@ -126,21 +132,38 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin
 
     # decide training params
     # metric
-    rpn_eval_metric = metric.RPNAccMetric()
-    rpn_cls_metric = metric.RPNLogLossMetric()
-    rpn_bbox_metric = metric.RPNL1LossMetric()
     eval_metric = metric.RCNNAccMetric(config)
     cls_metric = metric.RCNNLogLossMetric(config)
     bbox_metric = metric.RCNNL1LossMetric(config)
     eval_metrics = mx.metric.CompositeEvalMetric()
-    # rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric, eval_metric, cls_metric, bbox_metric
-    for child_metric in [rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric, eval_metric, cls_metric, bbox_metric]:
+
+    for child_metric in [eval_metric, cls_metric, bbox_metric]:
         eval_metrics.add(child_metric)
+    if config.TRAIN.JOINT_TRAINING or (not config.TRAIN.LEARN_NMS):
+        rpn_eval_metric = metric.RPNAccMetric()
+        rpn_cls_metric = metric.RPNLogLossMetric()
+        rpn_bbox_metric = metric.RPNL1LossMetric()
+        for child_metric in [rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric]:
+            eval_metrics.add(child_metric)
+    if config.TRAIN.LEARN_NMS:
+        eval_metrics.add(metric.NMSLossMetric(config, 'pos'))
+        eval_metrics.add(metric.NMSLossMetric(config, 'neg'))
+        eval_metrics.add(metric.NMSAccMetric(config))
+
     # callback
-    batch_end_callback = callback.Speedometer(train_data.batch_size, frequent=args.frequent)
+    batch_end_callback = [callback.Speedometer(train_data.batch_size, frequent=args.frequent)]
+    
+    if config.USE_PHILLY:
+        total_iter = (config.TRAIN.end_epoch - config.TRAIN.begin_epoch) * len(roidb) / input_batch_size
+        progress_frequent = min(args.frequent * 10, 100)
+        batch_end_callback.append(callback.PhillyProgressCallback(total_iter, progress_frequent))
+
     means = np.tile(np.array(config.TRAIN.BBOX_MEANS), 2 if config.CLASS_AGNOSTIC else config.dataset.NUM_CLASSES)
     stds = np.tile(np.array(config.TRAIN.BBOX_STDS), 2 if config.CLASS_AGNOSTIC else config.dataset.NUM_CLASSES)
     epoch_end_callback = [mx.callback.module_checkpoint(mod, prefix, period=1, save_optimizer_states=True), callback.do_checkpoint(prefix, means, stds)]
+    # batch_end_callback.append(mx.callback.module_checkpoint(mod, prefix, period=500, save_optimizer_states=True)) 
+    # batch_end_callback.append(callback.do_checkpoint(prefix, means, stds, period=500))
+    
     # decide learning rate
     base_lr = lr
     lr_factor = config.TRAIN.lr_factor
@@ -171,7 +194,7 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin
 def main():
     print('Called with argument:', args)
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
-    train_net(args, ctx, config.network.pretrained_dir, config.network.pretrained_resnet, config.network.pretrained_epoch, config.TRAIN.model_prefix,
+    train_net(args, ctx, config.network.pretrained_dir, config.network.pretrained_resnet, config.network.pretrained_flow, config.network.pretrained_epoch, config.TRAIN.model_prefix,
               config.TRAIN.begin_epoch, config.TRAIN.end_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
 
 if __name__ == '__main__':

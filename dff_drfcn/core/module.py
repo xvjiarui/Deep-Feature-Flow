@@ -1,10 +1,16 @@
 # --------------------------------------------------------
 # Deep Feature Flow
-# Copyright (c) 2016 by Contributors
 # Copyright (c) 2017 Microsoft
-# Licensed under The Apache-2.0 License [see LICENSE for details]
+# Licensed under The MIT License [see LICENSE for details]
 # Modified by Yuwen Xiong
 # --------------------------------------------------------
+# Based on:
+# MX-RCNN
+# Copyright (c) 2016 by Contributors
+# Licence under The Apache 2.0 License
+# https://github.com/ijkguo/mx-rcnn/
+# --------------------------------------------------------
+
 
 """A `MutableModule` implement the `BaseModule` API, and allows input shape
 varying with training iterations. If shapes vary, executors will rebind,
@@ -230,7 +236,7 @@ class Module(BaseModule):
         return (self._arg_params, self._aux_params)
 
     def init_params(self, initializer=Uniform(0.01), arg_params=None, aux_params=None,
-                    allow_missing=False, force_init=False, allow_extra = False):
+                    allow_missing=False, force_init=False, allow_extra=False):
         """Initialize the parameters and auxiliary states.
 
         Parameters
