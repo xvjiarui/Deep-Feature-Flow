@@ -14,7 +14,7 @@ import os
 import sys
 import time
 import logging
-from config.config import config, update_config
+from config.config import config, update_config, update_philly_config
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Test a R-FCN network')
