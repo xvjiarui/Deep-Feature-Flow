@@ -121,11 +121,11 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
         print('continue training from ', begin_epoch)
         logger.info('continue training from ', begin_epoch)
     elif config.TRAIN.AUTO_RESUME:
-        for cur_epoch in range(config.TRAIN.end_epoch-1, config.TRAIN.begin_epoch, -1):
+        for cur_epoch in range(end_epoch-1, begin_epoch, -1):
             params_filename = '{}-{:04d}.params'.format(prefix, cur_epoch)
             states_filename = '{}-{:04d}.states'.format(prefix, cur_epoch)
             if os.path.exists(params_filename) and os.path.exists(states_filename):
-                config.TRAIN.begin_epoch = cur_epoch
+                begin_epoch = cur_epoch
                 arg_params, aux_params = load_param(prefix, cur_epoch, convert=True)
                 mod._preload_opt_states = states_filename
                 print('auto continue training from {}, {}'.format(params_filename, states_filename))
@@ -167,7 +167,7 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
     batch_end_callback = [callback.Speedometer(train_data.batch_size, frequent=args.frequent)]
     
     if config.USE_PHILLY:
-        total_iter = (config.TRAIN.end_epoch - config.TRAIN.begin_epoch) * len(roidb) / input_batch_size
+        total_iter = (end_epoch - begin_epoch) * len(roidb) / input_batch_size
         progress_frequent = min(args.frequent * 10, 100)
         batch_end_callback.append(callback.PhillyProgressCallback(total_iter, progress_frequent))
 
