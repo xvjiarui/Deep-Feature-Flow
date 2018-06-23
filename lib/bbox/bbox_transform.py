@@ -167,6 +167,30 @@ def iou_pred(boxes, box_deltas):
 
     return pred_boxes
 
+def translation_dist(src_boxes, dst_boxes):
+    """
+    determine distance between src_boxes and dst_boxes
+    :param boxes: n * 4 bounding boxes
+    :param query_boxes: k * 4 bounding boxes
+    :return: overlaps: n * k dist
+    """
+    n_ = src_boxes.shape[0]
+    k_ = dst_boxes.shape[0]
+    dist_mat = np.zeros((n_, k_), dtype=np.float)
+    for k in range(k_):
+        dst_width = dst_boxes[k, 2] - dst_boxes[k, 0] + 1
+        dst_height = dst_boxes[k, 3] - dst_boxes[k, 1] + 1
+        for n in range(n_):
+            src_width = src_boxes[k, 2] - src_boxes[k, 0] + 1
+            src_height = src_boxes[k, 3] - src_boxes[k, 1] + 1
+            dist = 0
+            dist += abs(src_boxes[k, 2] - dst_boxes[k, 2])/dst_width
+            dist += abs(src_boxes[k, 3] - dst_boxes[k, 3])/dst_height
+            dist += np.log(abs(src_width/dst_width))
+            dist += np.log(abs(src_height/dst_height))
+            dist_mat[n, k] = dist
+    return dist_mat
+    
 
 # define bbox_transform and bbox_pred
 bbox_transform = nonlinear_transform
