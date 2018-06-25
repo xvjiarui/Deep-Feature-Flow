@@ -4,6 +4,7 @@
 # Copyright (c) 2017 Microsoft
 # Licensed under The Apache-2.0 License [see LICENSE for details]
 # Modified by Yuwen Xiong
+# Modified by Jiarui XU
 # --------------------------------------------------------
 
 import mxnet as mx
@@ -12,7 +13,8 @@ import numpy as np
 
 def get_rpn_names():
     pred = ['rpn_cls_prob', 'rpn_bbox_loss']
-    label = ['rpn_label', 'rpn_bbox_target', 'rpn_bbox_weight']
+    label = ['rpn_label', 'ref_rpn_label', 'rpn_bbox_target', 'ref_rpn_bbox_target', 'rpn_bbox_weight', 'ref_rpn_bbox_weight']
+
     return pred, label
 
 
@@ -36,9 +38,10 @@ class RPNAccMetric(mx.metric.EvalMetric):
     def update(self, labels, preds):
         pred = preds[self.pred.index('rpn_cls_prob')]
         label = labels[self.label.index('rpn_label')]
+        ref_label = labels[self.label.index('ref_rpn_label')]
 
         # pred (b, c, p) or (b, c, h, w)
-        pred_label = mx.ndarray.argmax_channel(pred).asnumpy().astype('int32')
+        pred_label = mx.ndarray.argmax_channel(pred[0:1]).asnumpy().astype('int32')
         pred_label = pred_label.reshape((pred_label.shape[0], -1))
         # label (b, p)
         label = label.asnumpy().astype('int32')
@@ -51,6 +54,19 @@ class RPNAccMetric(mx.metric.EvalMetric):
         self.sum_metric += np.sum(pred_label.flat == label.flat)
         self.num_inst += len(pred_label.flat)
 
+        # pred (b, c, p) or (b, c, h, w)
+        ref_pred_label = mx.ndarray.argmax_channel(pred[1:2]).asnumpy().astype('int32')
+        ref_pred_label = ref_pred_label.reshape((ref_pred_label.shape[0], -1))
+        # label (b, p)
+        ref_label = ref_label.asnumpy().astype('int32')
+
+        # filter with keep_inds
+        keep_inds = np.where(ref_label != -1)
+        ref_pred_label = ref_pred_label[keep_inds]
+        ref_label = ref_label[keep_inds]
+
+        self.sum_metric += np.sum(ref_pred_label.flat == ref_label.flat)
+        self.num_inst += len(ref_pred_label.flat)
 
 class RCNNAccMetric(mx.metric.EvalMetric):
     def __init__(self, cfg):
