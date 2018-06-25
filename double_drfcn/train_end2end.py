@@ -69,7 +69,6 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
     sym_instance = eval(config.symbol + '.' + config.symbol)()
     sym = sym_instance.get_train_symbol(config)
     feat_sym = sym.get_internals()['rpn_cls_score_output']
-    pprint.pprint(sym.get_internals())
 
     # setup multi-gpu
     batch_size = len(ctx)

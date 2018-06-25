@@ -176,19 +176,18 @@ def translation_dist(src_boxes, dst_boxes):
     """
     n_ = src_boxes.shape[0]
     k_ = dst_boxes.shape[0]
-    dist_mat = np.zeros((n_, k_), dtype=np.float)
+    dim = 4
+    dist_mat = np.zeros((n_, k_, dim), dtype=np.float)
     for k in range(k_):
         dst_width = dst_boxes[k, 2] - dst_boxes[k, 0] + 1
         dst_height = dst_boxes[k, 3] - dst_boxes[k, 1] + 1
         for n in range(n_):
-            src_width = src_boxes[k, 2] - src_boxes[k, 0] + 1
-            src_height = src_boxes[k, 3] - src_boxes[k, 1] + 1
-            dist = 0
-            dist += abs(src_boxes[k, 2] - dst_boxes[k, 2])/dst_width
-            dist += abs(src_boxes[k, 3] - dst_boxes[k, 3])/dst_height
-            dist += np.log(abs(src_width/dst_width))
-            dist += np.log(abs(src_height/dst_height))
-            dist_mat[n, k] = dist
+            src_width = src_boxes[n, 2] - src_boxes[n, 0] + 1
+            src_height = src_boxes[n, 3] - src_boxes[n, 1] + 1
+            dist_mat[n, k, 0] = (src_boxes[n, 2] - dst_boxes[k, 2])/dst_width
+            dist_mat[n, k, 1] = (src_boxes[n, 3] - dst_boxes[k, 3])/dst_height
+            dist_mat[n, k, 2] = np.log(src_width/dst_width)
+            dist_mat[n, k, 3] = np.log(src_height/dst_height)
     return dist_mat
     
 

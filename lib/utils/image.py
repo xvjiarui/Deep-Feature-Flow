@@ -7,6 +7,7 @@ from bbox.bbox_transform import clip_boxes
 import phillyzip
 
 
+num_empty_gt = 0
 # TODO: This two functions should be merged with individual data loader
 def get_image(roidb, config):
     """
@@ -194,11 +195,25 @@ def get_double_image(roidb, config):
             ref_id = min(max(roi_rec['frame_seg_id'] + np.random.randint(config.TRAIN.MIN_OFFSET, config.TRAIN.MAX_OFFSET+1), 0),roi_rec['frame_seg_len']-1)
             ref_image = roi_rec['pattern'] % ref_id
             assert os.path.exists(ref_image), '{} does not exist'.format(ref_image)
-            ref_im = cv2.imread(ref_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
 
             ref_annotation = ref_image.replace("Data", "Annotations").replace("JPEG","xml")
             assert os.path.exists(ref_annotation), '{} does not exist'.format(ref_annotation)
             ref_roi_rec = load_roi_rec(ref_annotation)
+            ref_roi_rec['image'] = ref_image
+            # in case of empty gt
+            while len(ref_roi_rec['gt_classes']) == 0 and ref_id < roi_rec['frame_seg_id']+config.TRAIN.MAX_OFFSET:
+                ref_id += 1
+                ref_image = roi_rec['pattern'] % ref_id
+                assert os.path.exists(ref_image), '{} does not exist'.format(ref_image)
+                ref_annotation = ref_image.replace("Data", "Annotations").replace("JPEG","xml")
+                assert os.path.exists(ref_annotation), '{} does not exist'.format(ref_annotation)
+                ref_roi_rec = load_roi_rec(ref_annotation)
+                ref_roi_rec['image'] = ref_image
+                global num_empty_gt
+                num_empty_gt += 1
+                print "empty gt {}".format(num_empty_gt)
+
+            ref_im = cv2.imread(ref_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         else:
             ref_im = im.copy()
             ref_roi_rec = roi_rec.copy()

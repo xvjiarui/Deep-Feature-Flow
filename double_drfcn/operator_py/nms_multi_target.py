@@ -13,8 +13,9 @@ Nms Multi-thresh Target Operator selects foreground and background roi,
 
 import mxnet as mx
 import numpy as np
+import pdb
 
-from bbox.bbox_transform import bbox_overlaps
+from bbox.bbox_transform import bbox_overlaps, translation_dist
 
 
 class NmsMultiTargetOp(mx.operator.CustomOp):
@@ -34,27 +35,34 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
         gt_box_bef = in_data[4].asnumpy()
         score_bef = in_data[5].asnumpy()
 
-        def get_max_socre_bboxes(score_list_per_class):
+        num_fg_classes = bbox.shape[1]
+        batch_image, num_gt, code_size = gt_box.shape
+        num_fg_classes = bbox.shape[1]
+        assert batch_image == 1, 'only support batch_image=1, but receive %d' % num_gt
+        assert code_size == 5, 'code_size of gt should be 5, but receive %d' % code_size
+        assert len(score.shape) == 2, 'shape of score is %d instead of 2.' % len(score.shape)
+        assert score.shape[1] == num_fg_classes, 'number of fg classes should be same for boxes and scores'
+        assert bbox.shape[1] == bbox_bef.shape[1], 'num_fg_calsses should be same among frames'
+        # assert gt_box.shape[1] == gt_box_bef.shape[1], 'will gt disappear? {} {}'.format(gt_box.shape[1], gt_box_bef.shape[1])
+
+        def get_max_socre_bboxes(score_list_per_class, num_boxes):
             if len(score_list_per_class) == 0:
                 return np.zeros(shape=(num_boxes, self._num_thresh), dtype=np.float32)
             else:
+                output_list_per_class = []
                 for score in score_list_per_class:
                     num_boxes = score.shape[0]
                     max_score_indices = np.argmax(score, axis=0)
+                    # in case all indices are 0
+                    valid_bbox_indices = np.where(score)[0]
                     output = np.zeros((num_boxes,))
-                    output[max_score_indices] = 1
+
+                    output[np.intersect1d(max_score_indices, valid_bbox_indices)] = 1
                     output_list_per_class.append(output)
                 output_per_class = np.stack(output_list_per_class, axis=-1)
                 return output_per_class
 
         def get_scores(bbox, gt_box, score):
-            num_boxes = bbox.shape[0]
-            num_fg_classes = bbox.shape[1]
-            batch_image, num_gt, code_size = gt_box.shape
-            assert batch_image == 1, 'only support batch_image=1, but receive %d' % num_gt
-            assert code_size == 5, 'code_size of gt should be 5, but receive %d' % code_size
-            assert len(score.shape) == 2, 'shape of score is %d instead of 2.' % len(score.shape)
-            assert score.shape[1] == num_fg_classes, 'number of fg classes should be same for boxes and scores'
 
             output_list = []
             for cls_idx in range(0, num_fg_classes):
@@ -97,12 +105,11 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
 
         def get_target(bbox, gt_box, score, bbox_bef, gt_box_bef, score_bef):
 
+            num_boxes = bbox.shape[0]
+            num_boxes_bef = bbox_bef.shape[0]
             score_list = get_scores(bbox, gt_box, score)
             score_bef_list = get_scores(bbox_bef, gt_box_bef, score_bef)
 
-            num_fg_classes = bbox.shape[1]
-            assert bbox.shape[1] == bbox_bef.shape[1], 'num_fg_calsses should be same among frames'
-            assert gt_box.shape[0] == gt_box_bef.shape[0], 'will gt disappear?'
             output_list = []
             output_bef_list = []
             for cls_idx in range(0, num_fg_classes):
@@ -113,15 +120,35 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
 
                 valid_gt_bef_mask = (gt_box[0, :, -1].astype(np.int32)==(cls_idx+1))
                 valid_gt_bef_box = gt_box[0, valid_gt_mask, :]
-                assert len(valid_gt_bef_box) == num_valid_gt, "will gt disappear"
+                num_valid_gt_bef = len(valid_gt_bef_box)
+                # assert len(valid_gt_bef_box) == num_valid_gt, "will gt disappear"
 
+                if num_valid_gt != num_valid_gt_bef:
+                    if num_valid_gt_bef > num_valid_gt:
+                        num_rm = num_valid_gt_bef - num_valid_gt
+                        gt_overlap_mat = bbox_overlaps(valid_gt_bef_box.astype(np.float), 
+                            valid_gt_box.astype(np.float))
+                        rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
+                        np.delete(valid_gt_bef_box, rm_indices, axis=0)
+                        assert valid_gt_bef_box.shape == valid_gt_box.shape, "failed remove, {} -> {}".format(valid_gt_bef_box.shape[0], valid_gt_box.shape[0])
+                        print "success remove bef"
+                    else:
+                        num_rm = num_valid_gt - num_valid_gt_bef
+                        gt_overlap_mat = bbox_overlaps(valid_gt_box.astype(np.float), 
+                            valid_gt_bef_box.astype(np.float))
+                        rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
+                        np.delete(valid_gt_box, rm_indices, axis=0)
+                        assert valid_gt_bef_box.shape == valid_gt_box.shape, "failed remove, {} -> {}".format(valid_gt_bef_box.shape[0], valid_gt_box.shape[0])
+                        print "success remove"
                 score_list_per_class = score_list[cls_idx]
                 score_bef_list_per_class = score_bef_list[cls_idx]
 
+                bbox_per_class = bbox[:, cls_idx, :]
+                bbox_bef_per_class = bbox_bef[:, cls_idx, :]
 
                 if len(score_list_per_class) == 0 or len(score_bef_list_per_class) == 0:
-                   output_list.append(get_max_socre_bboxes(score_list_per_class))
-                   output_bef_list.append(get_max_socre_bboxes(score_bef_list_per_class))
+                   output_list.append(get_max_socre_bboxes(score_list_per_class, num_boxes))
+                   output_bef_list.append(get_max_socre_bboxes(score_bef_list_per_class, num_boxes_bef))
                 else:
                     output_list_per_class = []
                     output_bef_list_per_class = []
@@ -129,29 +156,38 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                     for i in range(len(self._target_thresh)):
                         overlap_score = score_list_per_class[i]
                         overlap_score_bef = score_bef_list_per_class[i]
-                        dist_mat = translation_dist(bbox[np.where(overlap_score)[0]], valid_gt_box)
-                        dist_bef_mat = translation_dist(bbox_bef[np.where(overlap_score_bef)[0]], valid_gt_bef_box)
                         output = np.zeros((overlap_score.shape[0],))
                         output_bef = np.zeros((overlap_score_bef.shape[0],))
+                        valid_bbox_indices = np.where(overlap_score)[0]
+                        valid_bbox_bef_indices = np.where(overlap_score_bef)[0]
+                        if np.count_nonzero(overlap_score) == 0 or np.count_nonzero(overlap_score_bef) == 0:
+                            output_list_per_class.append(output)
+                            output_bef_list_per_class.append(output_bef)
+                            continue
+                        dist_mat = translation_dist(bbox_per_class[valid_bbox_indices], valid_gt_box[:, :-1])
+                        dist_bef_mat = translation_dist(bbox_bef_per_class[valid_bbox_bef_indices], valid_gt_bef_box[:, :-1])
                         for x in range(num_valid_gt):
-                            bbox_dist_mat = dist_mat[:, x:x+1]+dist_bef_mat[:, x:x+1].tranpose()
-                            assert bbox_dist_mat.shape == (len(bbox[np.where(overlap_score)[0]]), len(bbox_bef[np.where(overlap_score_bef)[0]]))
+                            dist_mat_shape = (bbox_per_class[valid_bbox_indices].shape[0], 
+                                bbox_bef_per_class[valid_bbox_bef_indices].shape[0], 4)
+                            bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat[:, x, :], 1), (1, dist_mat_shape[1],1)) - 
+                                np.tile(np.expand_dims(dist_bef_mat[:, x, :], 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
+                            assert bbox_dist_mat.shape == (len(bbox_per_class[valid_bbox_indices]), len(bbox_bef_per_class[valid_bbox_bef_indices]))
                             ind, ind_bef = np.unravel_index(np.argmin(bbox_dist_mat), bbox_dist_mat.shape)
-                            output[ind] = 1
-                            output_bef[ind_bef] = 1
+                            output[valid_bbox_indices[ind]] = 1
+                            output_bef[valid_bbox_bef_indices[ind_bef]] = 1
                         output_list_per_class.append(output)
                         output_bef_list_per_class.append(output_bef)
                     output_per_class = np.stack(output_list_per_class, axis=-1)
                     output_bef_per_class = np.stack(output_bef_list_per_class, axis=-1)
                     output_list.append(output_per_class)
                     output_bef_list.append(output_bef_per_class)
-            # [num_box, num_fg_classes, num_thresh]
+            # [num_boxes, num_fg_classes, num_thresh]
             blob = np.stack(output_list, axis=1).astype(np.float32, copy=False)
             blob_bef = np.stack(output_list, axis=1).astype(np.float32, copy=False)
             return blob, blob_bef
 
         blob, blob_bef = get_target(bbox, gt_box, score, bbox_bef, gt_box_bef, score_bef)
-        blob = np.concatenate(blob, blob_bef)
+        blob = np.concatenate((blob, blob_bef))
         self.assign(out_data[0], req[0], blob)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -188,7 +224,7 @@ class NmsMultiTargetProp(mx.operator.CustomOpProp):
         assert bbox_shape[0] == score_shape[0], 'ROI number should be same for bbox and score'
         assert bbox_bef_shape[0] == score_bef_shape[0], 'ROI number should be same for bbox and score'
 
-        assert gt_box_shape == gt_box_bef_shape, 'GT is not consistent!!!'
+        # assert gt_box_shape == gt_box_bef_shape, 'GT is not consistent!!!'
 
         num_boxes = bbox_shape[0]
         num_fg_classes = bbox_shape[1]

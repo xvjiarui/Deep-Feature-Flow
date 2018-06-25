@@ -112,6 +112,9 @@ def get_rpn_double_batch(roidb, cfg):
         gt_boxes[:, 0:4] = roidb[0]['boxes'][gt_inds, :]
         gt_boxes[:, 4] = roidb[0]['gt_classes'][gt_inds]
     else:
+        print 'gt_classes'
+        import pdb
+        pdb.set_trace()
         gt_boxes = np.empty((0, 5), dtype=np.float32)
 
     if ref_roidb[0]['gt_classes'].size > 0:
@@ -120,6 +123,9 @@ def get_rpn_double_batch(roidb, cfg):
         ref_gt_boxes[:, 0:4] = ref_roidb[0]['boxes'][gt_inds, :]
         ref_gt_boxes[:, 4] = ref_roidb[0]['gt_classes'][gt_inds]
     else:
+        print 'gt_classes_ref'
+        import pdb
+        pdb.set_trace()
         ref_gt_boxes = np.empty((0, 5), dtype=np.float32)
 
     data = {'data': im_array,
