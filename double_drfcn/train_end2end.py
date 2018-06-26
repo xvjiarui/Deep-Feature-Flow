@@ -174,8 +174,9 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
     means = np.tile(np.array(config.TRAIN.BBOX_MEANS), 2 if config.CLASS_AGNOSTIC else config.dataset.NUM_CLASSES)
     stds = np.tile(np.array(config.TRAIN.BBOX_STDS), 2 if config.CLASS_AGNOSTIC else config.dataset.NUM_CLASSES)
     epoch_end_callback = [mx.callback.module_checkpoint(mod, prefix, period=1, save_optimizer_states=True), callback.do_checkpoint(prefix, means, stds)]
-    # batch_end_callback.append(mx.callback.module_checkpoint(mod, prefix, period=500, save_optimizer_states=True)) 
-    # batch_end_callback.append(callback.do_checkpoint(prefix, means, stds, period=500))
+    training_log = './.tf_logs/train'
+    # batch_end_callback.append(mx.contrib.tensorboard.LogMetricsCallback(training_log))
+    batch_end_callback.append(callback.LogMetricsCallback(training_log))
     
     # decide learning rate
     base_lr = lr

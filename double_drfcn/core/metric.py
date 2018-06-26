@@ -103,9 +103,12 @@ class RPNLogLossMetric(mx.metric.EvalMetric):
     def update(self, labels, preds):
         pred = preds[self.pred.index('rpn_cls_prob')]
         label = labels[self.label.index('rpn_label')]
+        ref_label = labels[self.label.index('ref_rpn_label')]
 
         # label (b, p)
         label = label.asnumpy().astype('int32').reshape((-1))
+        ref_label = ref_label.asnumpy().astype('int32').reshape((-1))
+        label = np.concatenate((label, ref_label))
         # pred (b, c, p) or (b, c, h, w) --> (b, p, c) --> (b*p, c)
         pred = pred.asnumpy().reshape((pred.shape[0], pred.shape[1], -1)).transpose((0, 2, 1))
         pred = pred.reshape((label.shape[0], -1))
