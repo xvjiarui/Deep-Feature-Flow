@@ -35,6 +35,26 @@ def get_rpn_testbatch(roidb, cfg):
 
     return data, label, im_info
 
+def get_rpn_double_testbatch(roidb, cfg):
+    """
+    prototype for rpn batch: data, im_info, gt_boxes
+    :param roidb: ['image', 'flipped'] + ['gt_boxes', 'boxes', 'gt_classes']
+    :return: data, label
+    """
+    imgs, ref_imgs, roidb, ref_roidb = get_double_image(roidb, cfg)
+    im_array = imgs
+    ref_im_array = ref_imgs
+    im_info = [np.array([roidb[i]['im_info']], dtype=np.float32) for i in range(len(roidb))]
+    ref_im_info = [np.array([ref_roidb[i]['im_info']], dtype=np.float32) for i in range(len(roidb))]
+
+    data = [{'data': im_array[i], 
+            'im_info': im_info[i],
+            'ref_data': ref_im_array[i],
+            'ref_im_info': ref_im_info[i]
+                } for i in range(len(roidb))]
+    label = {}
+    return data, label, im_info, ref_im_info
+
 
 def get_rpn_batch(roidb, cfg):
     """

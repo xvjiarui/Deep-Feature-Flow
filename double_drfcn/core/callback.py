@@ -61,7 +61,7 @@ class PhillyProgressCallback(object):
             print('\nPROGRESS: {:.2f}%\n'.format(100.0 * self.cur_iter / self.total_iter))
         self.cur_iter += 1
 
-def do_checkpoint(prefix, means, stds):
+def do_checkpoint(prefix, means, stds, period=1):
     def _callback(iter_no, sym, arg, aux):
         if (iter_no+1) % period == 0:
             arg['bbox_pred_weight_test'] = (arg['bbox_pred_weight'].T * mx.nd.array(stds)).T

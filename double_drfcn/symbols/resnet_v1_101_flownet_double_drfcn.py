@@ -1797,84 +1797,9 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
 
         return rpn_cls_score, rpn_bbox_pred, conv_feats[1]
 
-    def get_bbox_symbol(self, cfg, rpn_cls_score, rpn_bbox_pred, rcnn_feat, im_info, gt_boxes, index=1):
-
-        # config alias for convenient
-        num_classes = cfg.dataset.NUM_CLASSES
-        num_reg_classes = (2 if cfg.CLASS_AGNOSTIC else num_classes)
-        num_anchors = cfg.network.NUM_ANCHORS
-
-        # prepare rpn data
-        rpn_cls_score_reshape = mx.sym.Reshape(
-            data=rpn_cls_score, shape=(0, 2, -1, 0), name="rpn_cls_score_reshape")
-    
-        # bounding box regression
-        if cfg.network.NORMALIZE_RPN:
-            rpn_bbox_pred = mx.sym.Custom(
-                bbox_pred=rpn_bbox_pred, op_type='rpn_inv_normalize', num_anchors=num_anchors,
-                bbox_mean=cfg.network.ANCHOR_MEANS, bbox_std=cfg.network.ANCHOR_STDS)
-
-        # ROI proposal
-        rpn_cls_act = mx.sym.SoftmaxActivation(
-            data=rpn_cls_score_reshape, mode="channel", name="rpn_cls_act")
-        rpn_cls_act_reshape = mx.sym.Reshape(
-            data=rpn_cls_act, shape=(0, 2 * num_anchors, -1, 0), name='rpn_cls_act_reshape')
-
-        if cfg.TRAIN.CXX_PROPOSAL:
-            rois = mx.contrib.sym.Proposal(
-                cls_prob=rpn_cls_act_reshape, bbox_pred=rpn_bbox_pred, im_info=im_info, name='rois',
-                feature_stride=cfg.network.RPN_FEAT_STRIDE, scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
-                rpn_pre_nms_top_n=cfg.TRAIN.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TRAIN.RPN_POST_NMS_TOP_N,
-                threshold=cfg.TRAIN.RPN_NMS_THRESH, rpn_min_size=cfg.TRAIN.RPN_MIN_SIZE)
-        else:
-            rois = mx.sym.Custom(
-                cls_prob=rpn_cls_act_reshape, bbox_pred=rpn_bbox_pred, im_info=im_info, name='rois',
-                op_type='proposal', feat_stride=cfg.network.RPN_FEAT_STRIDE,
-                scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
-                rpn_pre_nms_top_n=cfg.TRAIN.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TRAIN.RPN_POST_NMS_TOP_N,
-                threshold=cfg.TRAIN.RPN_NMS_THRESH, rpn_min_size=cfg.TRAIN.RPN_MIN_SIZE)
-    
-         # ROI proposal target
-        gt_boxes_reshape = mx.sym.Reshape(data=gt_boxes, shape=(-1, 5), name='gt_boxes_reshape')
-        rois, label, bbox_target, bbox_weight = mx.sym.Custom(rois=rois, gt_boxes=gt_boxes_reshape,
-                                                                  op_type='proposal_target',
-                                                                  num_classes=num_reg_classes,
-                                                                  batch_images=cfg.TRAIN.BATCH_IMAGES,
-                                                                  batch_rois=cfg.TRAIN.BATCH_ROIS,
-                                                                  cfg=cPickle.dumps(cfg),
-                                                                  fg_fraction=cfg.TRAIN.FG_FRACTION)
-    
-        conv_new_1 = mx.sym.Convolution(data=rcnn_feat, kernel=(1, 1), num_filter=256, name="conv_new_1")
-        conv_new_1_relu = mx.sym.Activation(data=conv_new_1, act_type='relu', name='conv_new_1_relu')
-
-        offset_t = mx.contrib.sym.DeformablePSROIPooling(name='offset_t', data=conv_new_1_relu, rois=rois, group_size=1, pooled_size=7,
-                                                         sample_per_part=4, no_trans=True, part_size=7, output_dim=256, spatial_scale=0.0625)
-        offset = mx.sym.FullyConnected(name='offset', data=offset_t, num_hidden=7 * 7 * 2, lr_mult=0.01)
-        offset_reshape = mx.sym.Reshape(data=offset, shape=(-1, 2, 7, 7), name="offset_reshape")
-
-        deformable_roi_pool = mx.contrib.sym.DeformablePSROIPooling(name='deformable_roi_pool', data=conv_new_1_relu, rois=rois,
-                                                                    trans=offset_reshape, group_size=1, pooled_size=7, sample_per_part=4,
-                                                                    no_trans=False, part_size=7, output_dim=256, spatial_scale=0.0625, trans_std=0.1)
-    
-        fc_new_1 = mx.symbol.FullyConnected(name='fc_new_1', data=deformable_roi_pool, num_hidden=1024)
-        fc_all_1 = fc_new_1
-        fc_all_1_relu = mx.sym.Activation(data=fc_all_1, act_type='relu', name='fc_all_1_relu')
-        fc_new_2 = mx.symbol.FullyConnected(name='fc_new_2', data=fc_all_1_relu, num_hidden=1024)
-        fc_all_2 = fc_new_2
-        fc_all_2_relu = mx.sym.Activation(data=fc_all_2, act_type='relu', name='fc_all_2_relu')
-
-        # cls_score/bbox_pred
-        cls_score = mx.sym.FullyConnected(name='cls_score', data=fc_all_2_relu, num_hidden=num_classes)
-        bbox_pred = mx.sym.FullyConnected(name='bbox_pred', data=fc_all_2_relu, num_hidden=num_reg_classes * 4)
-
-        output_sym_list = [rpn_cls_score_reshape, rpn_bbox_pred, rois, label, bbox_target, bbox_weight, fc_all_2_relu, cls_score, bbox_pred]
-
-        return output_sym_list
-
-    def get_sorted_bbox_symbol(self, cfg, rois, cls_score, bbox_pred, fc_all_2_relu, im_info, suffix='1'):
+    def get_sorted_bbox_symbol(self, cfg, rois, cls_score, bbox_pred, fc_all_2_relu, im_info, suffix='1', is_train=True):
 
 
-        is_train = True
         num_classes = cfg.dataset.NUM_CLASSES
         num_reg_classes = (2 if cfg.CLASS_AGNOSTIC else num_classes)
         nms_target_thresh = np.fromstring(cfg.network.NMS_TARGET_THRESH, dtype=float, sep=',')
@@ -1943,7 +1868,7 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
 
         return sorted_bbox, sorted_score, nms_embedding_feat
 
-    def get_train_symbol(self, cfg):
+    def get_train_symbol_(self, cfg):
 
         num_anchors = cfg.network.NUM_ANCHORS
         is_train = True
@@ -2189,6 +2114,355 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
         self.sym = mx.sym.Group(output_sym_list)
         return self.sym
 
+    def get_test_symbol(self, cfg):
+
+        num_anchors = cfg.network.NUM_ANCHORS
+        is_train = False
+        num_classes = cfg.dataset.NUM_CLASSES
+        num_reg_classes = (2 if cfg.CLASS_AGNOSTIC else num_classes)
+
+        data = mx.sym.Variable(name="data")
+        im_info = mx.sym.Variable(name="im_info")
+
+        ref_data = mx.sym.Variable(name="ref_data")
+        ref_im_info = mx.sym.Variable(name="ref_im_info")
+
+
+        im_info_list = [im_info, ref_im_info]
+
+        output_sym_list = []
+
+        sorted_bbox_feat_list = []
+
+        fc_list = []
+
+        concat_data = mx.sym.concat(data, ref_data, dim=0)
+        concat_rpn_cls_score, concat_rpn_bbox_pred, concat_rcnn_feat = self.get_rpn_symbol(concat_data, cfg)
+
+        # prepare rpn data
+        concat_rpn_cls_score_reshape = mx.sym.Reshape(
+            data=concat_rpn_cls_score, shape=(0, 2, -1, 0), name="rpn_cls_score_reshape")
+
+        # ROI proposal
+        concat_rpn_cls_act = mx.sym.SoftmaxActivation(
+            data=concat_rpn_cls_score_reshape, mode="channel", name="rpn_cls_act")
+        concat_rpn_cls_act_reshape = mx.sym.Reshape(
+            data=concat_rpn_cls_act, shape=(0, 2 * num_anchors, -1, 0), name='rpn_cls_act_reshape')
+
+        rpn_cls_act_reshape, ref_rpn_cls_act_reshape = mx.sym.split(concat_rpn_cls_act_reshape, axis=0, num_outputs=2)
+        rpn_bbox_pred, ref_rpn_bbox_pred = mx.sym.split(concat_rpn_bbox_pred, axis=0, num_outputs=2)
+        if cfg.TEST.CXX_PROPOSAL:
+            rois = mx.contrib.sym.Proposal(
+                cls_prob=rpn_cls_act_reshape, bbox_pred=rpn_bbox_pred, im_info=im_info, name='rois',
+                feature_stride=cfg.network.RPN_FEAT_STRIDE, scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
+                rpn_pre_nms_top_n=cfg.TEST.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TEST.RPN_POST_NMS_TOP_N,
+                threshold=cfg.TEST.RPN_NMS_THRESH, rpn_min_size=cfg.TEST.RPN_MIN_SIZE)
+        else:
+            rois = mx.sym.Custom(
+                cls_prob=rpn_cls_act_reshape, bbox_pred=rpn_bbox_pred, im_info=im_info, name='rois',
+                op_type='proposal', feat_stride=cfg.network.RPN_FEAT_STRIDE,
+                scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
+                rpn_pre_nms_top_n=cfg.TEST.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TEST.RPN_POST_NMS_TOP_N,
+                threshold=cfg.TEST.RPN_NMS_THRESH, rpn_min_size=cfg.TEST.RPN_MIN_SIZE)
+
+        if cfg.TEST.CXX_PROPOSAL:
+            ref_rois = mx.contrib.sym.Proposal(
+                cls_prob=ref_rpn_cls_act_reshape, bbox_pred=ref_rpn_bbox_pred, im_info=ref_im_info, name='ref_rois',
+                feature_stride=cfg.network.RPN_FEAT_STRIDE, scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
+                rpn_pre_nms_top_n=cfg.TEST.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TEST.RPN_POST_NMS_TOP_N,
+                threshold=cfg.TEST.RPN_NMS_THRESH, rpn_min_size=cfg.TEST.RPN_MIN_SIZE)
+        else:
+            ref_rois = mx.sym.Custom(
+                cls_prob=ref_rpn_cls_act_reshape, bbox_pred=ref_rpn_bbox_pred, im_info=ref_im_info, name='ref_rois',
+                op_type='proposal', feat_stride=cfg.network.RPN_FEAT_STRIDE,
+                scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
+                rpn_pre_nms_top_n=cfg.TEST.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TEST.RPN_POST_NMS_TOP_N,
+                threshold=cfg.TEST.RPN_NMS_THRESH, rpn_min_size=cfg.TEST.RPN_MIN_SIZE)
+
+
+        concat_rois = mx.sym.concat(rois, ref_rois, dim=0, name='concat_rois')
+
+        concat_conv_new_1 = mx.sym.Convolution(data=concat_rcnn_feat, kernel=(1, 1), num_filter=256, name="conv_new_1")
+        concat_conv_new_1_relu = mx.sym.Activation(data=concat_conv_new_1, act_type='relu', name='conv_new_1_relu')
+
+        offset_t = mx.contrib.sym.DeformablePSROIPooling(name='offset_t', data=concat_conv_new_1_relu, rois=concat_rois, group_size=1, pooled_size=7,
+                                                         sample_per_part=4, no_trans=True, part_size=7, output_dim=256, spatial_scale=0.0625)
+        offset = mx.sym.FullyConnected(name='offset', data=offset_t, num_hidden=7 * 7 * 2, lr_mult=0.01)
+        offset_reshape = mx.sym.Reshape(data=offset, shape=(-1, 2, 7, 7), name="offset_reshape")
+
+        concat_deformable_roi_pool = mx.contrib.sym.DeformablePSROIPooling(name='deformable_roi_pool', data=concat_conv_new_1_relu, rois=concat_rois,
+                                                                    trans=offset_reshape, group_size=1, pooled_size=7, sample_per_part=4,
+                                                                    no_trans=False, part_size=7, output_dim=256, spatial_scale=0.0625, trans_std=0.1)
+    
+        concat_fc_new_1 = mx.symbol.FullyConnected(name='fc_new_1', data=concat_deformable_roi_pool, num_hidden=1024)
+        concat_fc_all_1 = concat_fc_new_1
+        concat_fc_all_1_relu = mx.sym.Activation(data=concat_fc_all_1, act_type='relu', name='fc_all_1_relu')
+        concat_fc_new_2 = mx.symbol.FullyConnected(name='fc_new_2', data=concat_fc_all_1_relu, num_hidden=1024)
+        concat_fc_all_2 = concat_fc_new_2
+        concat_fc_all_2_relu = mx.sym.Activation(data=concat_fc_all_2, act_type='relu', name='fc_all_2_relu')
+
+        # cls_score/bbox_pred
+        concat_cls_score = mx.sym.FullyConnected(name='cls_score', data=concat_fc_all_2_relu, num_hidden=num_classes)
+        concat_bbox_pred = mx.sym.FullyConnected(name='bbox_pred', data=concat_fc_all_2_relu, num_hidden=num_reg_classes * 4)
+
+        concat_cls_prob = mx.sym.SoftmaxActivation(name='cls_prob', data=concat_cls_score)
+        concat_cls_prob = mx.sym.Reshape(data=concat_cls_prob, shape=(2*cfg.TEST.BATCH_IMAGES, -1, num_classes),
+                                  name='cls_prob_reshape')
+        concat_bbox_pred_reshape = mx.sym.Reshape(data=concat_bbox_pred, name='bbox_pred_reshape',
+                                           shape=(2*cfg.TEST.BATCH_IMAGES, -1, 4 * num_reg_classes))
+
+        output_sym_list = [concat_rois, concat_cls_prob, concat_bbox_pred_reshape]
+
+        fc_all_2_relu, ref_fc_all_2_relu = mx.sym.split(concat_fc_all_2_relu, axis=0, num_outputs=2)
+        cls_score, ref_cls_score = mx.sym.split(concat_cls_score, axis=0, num_outputs=2)
+        bbox_pred, ref_bbox_pred = mx.sym.split(concat_bbox_pred, axis=0, num_outputs=2)
+
+        sorted_bbox, sorted_score, nms_embedding_feat = self.get_sorted_bbox_symbol(cfg, rois, cls_score, bbox_pred, fc_all_2_relu, im_info, 1, is_train=False)
+        ref_sorted_bbox, ref_sorted_score, ref_nms_embedding_feat = self.get_sorted_bbox_symbol(cfg, ref_rois, ref_cls_score, ref_bbox_pred, ref_fc_all_2_relu, ref_im_info, 2, is_train=False)
+
+        concat_sorted_bbox = mx.sym.concat(sorted_bbox, ref_sorted_bbox, dim=0, name='concat_sorted_bbox')
+        concat_sorted_score = mx.sym.concat(sorted_score, ref_sorted_score, dim=0, name='concat_sorted_score')
+        concat_nms_embedding_feat = mx.sym.concat(nms_embedding_feat, ref_nms_embedding_feat, dim=0)
+
+
+        concat_nms_position_matrix = NMS_UTILS.extract_multi_position_matrix(concat_sorted_bbox)
+
+        # 2*first_n hacking here
+        nms_target_thresh = np.fromstring(cfg.network.NMS_TARGET_THRESH, dtype=float, sep=',')
+        num_thresh = len(nms_target_thresh)
+        nms_eps = 1e-8
+        first_n = cfg.TEST.FIRST_N
+        num_fg_classes = num_classes - 1
+        bbox_means = None
+        bbox_stds = None 
+        nongt_dim = cfg.TEST.RPN_POST_NMS_TOP_N
+        first_n *= 2
+        # nms_attention_1, [first_n, num_fg_classes, 1024]
+        concat_nms_attention_1, concat_nms_softmax_1 = self.attention_module_nms_multi_head(
+            concat_nms_embedding_feat, concat_nms_position_matrix,
+            num_rois=first_n, index=1, group=16,
+            dim=(1024, 1024, 128), fc_dim=(64, 16), feat_dim=128)
+        concat_nms_all_feat_1 = concat_nms_embedding_feat + concat_nms_attention_1
+        concat_nms_all_feat_1_relu = mx.sym.Activation(data=concat_nms_all_feat_1, act_type='relu', name='nms_all_feat_1_relu')
+        # [first_n * num_fg_classes, 1024]
+        concat_nms_all_feat_1_relu_reshape = mx.sym.Reshape(concat_nms_all_feat_1_relu, shape=(-3, -2))
+        # logit, [first_n * num_fg_classes, num_thresh]
+        concat_nms_conditional_logit = mx.sym.FullyConnected(name='nms_logit',
+                                                  data=concat_nms_all_feat_1_relu_reshape,
+                                                  num_hidden=num_thresh)
+        # logit_reshape, [first_n, num_fg_classes, num_thresh]
+        concat_nms_conditional_logit_reshape = mx.sym.Reshape(concat_nms_conditional_logit,
+                                                   shape=(first_n, num_fg_classes, num_thresh))
+        concat_nms_conditional_score = mx.sym.Activation(data=concat_nms_conditional_logit_reshape,
+                                              act_type='sigmoid', name='nms_conditional_score')
+        concat_sorted_score_reshape = mx.sym.expand_dims(concat_sorted_score, axis=2)
+        # sorted_score_reshape = mx.sym.BlockGrad(sorted_score_reshape)
+        concat_nms_multi_score = mx.sym.broadcast_mul(lhs=concat_sorted_score_reshape, rhs=concat_nms_conditional_score)
+
+        if cfg.TEST.MERGE_METHOD == -1:
+            nms_final_score = mx.sym.mean(data=concat_nms_multi_score, axis=2, name='nms_final_score')
+        elif cfg.TEST.MERGE_METHOD == -2:
+            nms_final_score = mx.sym.max(data=concat_nms_multi_score, axis=2, name='nms_final_score')
+        elif 0 <= cfg.TEST.MERGE_METHOD < num_thresh:
+            idx = cfg.TEST.MERGE_METHOD
+            nms_final_score = mx.sym.slice_axis(data=concat_nms_multi_score, axis=2, begin=idx, end=idx + 1)
+            nms_final_score = mx.sym.Reshape(nms_final_score, shape=(0, 0), name='nms_final_score')
+        else:
+            raise NotImplementedError('Unknown merge method %s.' % cfg.TEST.MERGE_METHOD)
+
+        output_sym_list.append(concat_sorted_bbox)
+        output_sym_list.append(concat_sorted_score)
+        output_sym_list.append(nms_final_score)
+
+
+        self.sym = mx.sym.Group(output_sym_list)
+        return self.sym
+
+    def get_train_symbol(self, cfg):
+
+        num_anchors = cfg.network.NUM_ANCHORS
+        is_train = True
+        num_classes = cfg.dataset.NUM_CLASSES
+        num_reg_classes = (2 if cfg.CLASS_AGNOSTIC else num_classes)
+
+        data = mx.sym.Variable(name="data")
+        im_info = mx.sym.Variable(name="im_info")
+        gt_boxes = mx.sym.Variable(name="gt_boxes")
+        rpn_label = mx.sym.Variable(name='label')
+        rpn_bbox_target = mx.sym.Variable(name='bbox_target')
+        rpn_bbox_weight = mx.sym.Variable(name='bbox_weight')
+
+        ref_data = mx.sym.Variable(name="ref_data")
+        ref_im_info = mx.sym.Variable(name="ref_im_info")
+        ref_gt_boxes = mx.sym.Variable(name="ref_gt_boxes")
+        ref_rpn_label = mx.sym.Variable(name='ref_label')
+        ref_rpn_bbox_target = mx.sym.Variable(name='ref_bbox_target')
+        ref_rpn_bbox_weight = mx.sym.Variable(name='ref_bbox_weight')
+
+        gt_boxes_list = [gt_boxes, ref_gt_boxes]
+
+        im_info_list = [im_info, ref_im_info]
+
+        rpn_label_list = [rpn_label, ref_rpn_label]
+
+        rpn_bbox_target_list = [rpn_bbox_target, ref_rpn_bbox_target]
+
+        rpn_bbox_weight_list = [rpn_bbox_weight, ref_rpn_bbox_weight]
+
+        output_sym_list = []
+
+        sorted_bbox_feat_list = []
+
+        fc_list = []
+
+        concat_data = mx.sym.concat(data, ref_data, dim=0)
+        concat_gt_boxes = mx.sym.concat(gt_boxes, ref_gt_boxes, dim=0)
+        concat_rpn_label = mx.sym.concat(rpn_label, ref_rpn_label, dim=0)
+        concat_rpn_bbox_target = mx.sym.concat(rpn_bbox_target, ref_rpn_bbox_target, dim=0)
+        concat_rpn_bbox_weight = mx.sym.concat(rpn_bbox_weight, ref_rpn_bbox_weight, dim=0)
+        concat_rpn_cls_score, concat_rpn_bbox_pred, concat_rcnn_feat = self.get_rpn_symbol(concat_data, cfg)
+
+        # prepare rpn data
+        concat_rpn_cls_score_reshape = mx.sym.Reshape(
+            data=concat_rpn_cls_score, shape=(0, 2, -1, 0), name="rpn_cls_score_reshape")
+    
+        # classification
+        concat_rpn_cls_prob = mx.sym.SoftmaxOutput(data=concat_rpn_cls_score_reshape, label=concat_rpn_label, multi_output=True,
+                                               normalization='valid', use_ignore=True, ignore_label=-1, name="rpn_cls_prob")
+        # bounding box regression
+        if cfg.network.NORMALIZE_RPN:
+            concat_rpn_bbox_loss_ = concat_rpn_bbox_weight * mx.sym.smooth_l1(name='rpn_bbox_loss_', scalar=1.0, data=(concat_rpn_bbox_pred - concat_rpn_bbox_target))
+            concat_rpn_bbox_pred = mx.sym.Custom(
+                bbox_pred=concat_rpn_bbox_pred, op_type='rpn_inv_normalize', num_anchors=num_anchors,
+                bbox_mean=cfg.network.ANCHOR_MEANS, bbox_std=cfg.network.ANCHOR_STDS)
+        else:
+            concat_rpn_bbox_loss_ = concat_rpn_bbox_weight * mx.sym.smooth_l1(name='rpn_bbox_loss_', scalar=3.0, data=(concat_rpn_bbox_pred - concat_rpn_bbox_target))
+        concat_rpn_bbox_loss = mx.sym.MakeLoss(name='rpn_bbox_loss', data=concat_rpn_bbox_loss_, grad_scale=1.0 / cfg.TRAIN.RPN_BATCH_SIZE)
+
+        # ROI proposal
+        concat_rpn_cls_act = mx.sym.SoftmaxActivation(
+            data=concat_rpn_cls_score_reshape, mode="channel", name="rpn_cls_act")
+        concat_rpn_cls_act_reshape = mx.sym.Reshape(
+            data=concat_rpn_cls_act, shape=(0, 2 * num_anchors, -1, 0), name='rpn_cls_act_reshape')
+
+        rpn_cls_act_reshape, ref_rpn_cls_act_reshape = mx.sym.split(concat_rpn_cls_act_reshape, axis=0, num_outputs=2)
+        rpn_bbox_pred, ref_rpn_bbox_pred = mx.sym.split(concat_rpn_bbox_pred, axis=0, num_outputs=2)
+        if cfg.TRAIN.CXX_PROPOSAL:
+            rois = mx.contrib.sym.Proposal(
+                cls_prob=rpn_cls_act_reshape, bbox_pred=rpn_bbox_pred, im_info=im_info, name='rois',
+                feature_stride=cfg.network.RPN_FEAT_STRIDE, scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
+                rpn_pre_nms_top_n=cfg.TRAIN.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TRAIN.RPN_POST_NMS_TOP_N,
+                threshold=cfg.TRAIN.RPN_NMS_THRESH, rpn_min_size=cfg.TRAIN.RPN_MIN_SIZE)
+        else:
+            rois = mx.sym.Custom(
+                cls_prob=rpn_cls_act_reshape, bbox_pred=rpn_bbox_pred, im_info=im_info, name='rois',
+                op_type='proposal', feat_stride=cfg.network.RPN_FEAT_STRIDE,
+                scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
+                rpn_pre_nms_top_n=cfg.TRAIN.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TRAIN.RPN_POST_NMS_TOP_N,
+                threshold=cfg.TRAIN.RPN_NMS_THRESH, rpn_min_size=cfg.TRAIN.RPN_MIN_SIZE)
+
+        if cfg.TRAIN.CXX_PROPOSAL:
+            ref_rois = mx.contrib.sym.Proposal(
+                cls_prob=ref_rpn_cls_act_reshape, bbox_pred=ref_rpn_bbox_pred, im_info=ref_im_info, name='ref_rois',
+                feature_stride=cfg.network.RPN_FEAT_STRIDE, scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
+                rpn_pre_nms_top_n=cfg.TRAIN.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TRAIN.RPN_POST_NMS_TOP_N,
+                threshold=cfg.TRAIN.RPN_NMS_THRESH, rpn_min_size=cfg.TRAIN.RPN_MIN_SIZE)
+        else:
+            ref_rois = mx.sym.Custom(
+                cls_prob=ref_rpn_cls_act_reshape, bbox_pred=ref_rpn_bbox_pred, im_info=ref_im_info, name='ref_rois',
+                op_type='proposal', feat_stride=cfg.network.RPN_FEAT_STRIDE,
+                scales=tuple(cfg.network.ANCHOR_SCALES), ratios=tuple(cfg.network.ANCHOR_RATIOS),
+                rpn_pre_nms_top_n=cfg.TRAIN.RPN_PRE_NMS_TOP_N, rpn_post_nms_top_n=cfg.TRAIN.RPN_POST_NMS_TOP_N,
+                threshold=cfg.TRAIN.RPN_NMS_THRESH, rpn_min_size=cfg.TRAIN.RPN_MIN_SIZE)
+
+         # ROI proposal target
+        gt_boxes_reshape = mx.sym.Reshape(data=gt_boxes, shape=(-1, 5), name='gt_boxes_reshape')
+        rois, label, bbox_target, bbox_weight = mx.sym.Custom(rois=rois, gt_boxes=gt_boxes_reshape,
+                                                                  op_type='proposal_target',
+                                                                  num_classes=num_reg_classes,
+                                                                  batch_images=cfg.TRAIN.BATCH_IMAGES,
+                                                                  batch_rois=cfg.TRAIN.BATCH_ROIS,
+                                                                  cfg=cPickle.dumps(cfg),
+                                                                  fg_fraction=cfg.TRAIN.FG_FRACTION)
+
+
+         # ROI proposal target
+        ref_gt_boxes_reshape = mx.sym.Reshape(data=ref_gt_boxes, shape=(-1, 5), name='ref_gt_boxes_reshape')
+        ref_rois, ref_label, ref_bbox_target, ref_bbox_weight = mx.sym.Custom(rois=ref_rois, gt_boxes=ref_gt_boxes_reshape,
+                                                                  op_type='proposal_target',
+                                                                  num_classes=num_reg_classes,
+                                                                  batch_images=cfg.TRAIN.BATCH_IMAGES,
+                                                                  batch_rois=cfg.TRAIN.BATCH_ROIS,
+                                                                  cfg=cPickle.dumps(cfg),
+                                                                  fg_fraction=cfg.TRAIN.FG_FRACTION)
+
+        concat_rois = mx.sym.concat(rois, ref_rois, dim=0)
+        concat_label = mx.sym.concat(label, ref_label, dim=0)
+        concat_bbox_target = mx.sym.concat(bbox_target, ref_bbox_target, dim=0)
+        concat_bbox_weight = mx.sym.concat(bbox_weight, ref_bbox_weight, dim=0)
+
+        concat_conv_new_1 = mx.sym.Convolution(data=concat_rcnn_feat, kernel=(1, 1), num_filter=256, name="conv_new_1")
+        concat_conv_new_1_relu = mx.sym.Activation(data=concat_conv_new_1, act_type='relu', name='conv_new_1_relu')
+
+        offset_t = mx.contrib.sym.DeformablePSROIPooling(name='offset_t', data=concat_conv_new_1_relu, rois=concat_rois, group_size=1, pooled_size=7,
+                                                         sample_per_part=4, no_trans=True, part_size=7, output_dim=256, spatial_scale=0.0625)
+        offset = mx.sym.FullyConnected(name='offset', data=offset_t, num_hidden=7 * 7 * 2, lr_mult=0.01)
+        offset_reshape = mx.sym.Reshape(data=offset, shape=(-1, 2, 7, 7), name="offset_reshape")
+
+        concat_deformable_roi_pool = mx.contrib.sym.DeformablePSROIPooling(name='deformable_roi_pool', data=concat_conv_new_1_relu, rois=concat_rois,
+                                                                    trans=offset_reshape, group_size=1, pooled_size=7, sample_per_part=4,
+                                                                    no_trans=False, part_size=7, output_dim=256, spatial_scale=0.0625, trans_std=0.1)
+    
+        concat_fc_new_1 = mx.symbol.FullyConnected(name='fc_new_1', data=concat_deformable_roi_pool, num_hidden=1024)
+        concat_fc_all_1 = concat_fc_new_1
+        concat_fc_all_1_relu = mx.sym.Activation(data=concat_fc_all_1, act_type='relu', name='fc_all_1_relu')
+        concat_fc_new_2 = mx.symbol.FullyConnected(name='fc_new_2', data=concat_fc_all_1_relu, num_hidden=1024)
+        concat_fc_all_2 = concat_fc_new_2
+        concat_fc_all_2_relu = mx.sym.Activation(data=concat_fc_all_2, act_type='relu', name='fc_all_2_relu')
+
+        # cls_score/bbox_pred
+        concat_cls_score = mx.sym.FullyConnected(name='cls_score', data=concat_fc_all_2_relu, num_hidden=num_classes)
+        concat_bbox_pred = mx.sym.FullyConnected(name='bbox_pred', data=concat_fc_all_2_relu, num_hidden=num_reg_classes * 4)
+
+        fc_all_2_relu, ref_fc_all_2_relu = mx.sym.split(concat_fc_all_2_relu, axis=0, num_outputs=2)
+        cls_score, ref_cls_score = mx.sym.split(concat_cls_score, axis=0, num_outputs=2)
+        bbox_pred, ref_bbox_pred = mx.sym.split(concat_bbox_pred, axis=0, num_outputs=2)
+
+        # classification
+        if cfg.TRAIN.ENABLE_OHEM:
+            print 'use ohem!'
+            labels_ohem, bbox_weights_ohem = mx.sym.Custom(op_type='BoxAnnotatorOHEM', num_classes=num_classes,
+                                                           num_reg_classes=num_reg_classes, roi_per_img=cfg.TRAIN.BATCH_ROIS_OHEM,
+                                                           cls_score=cls_score, bbox_pred=bbox_pred, labels=label,
+                                                           bbox_targets=bbox_target, bbox_weights=bbox_weight)
+            ref_labels_ohem, ref_bbox_weights_ohem = mx.sym.Custom(op_type='BoxAnnotatorOHEM', num_classes=num_classes,
+                                                           num_reg_classes=num_reg_classes, roi_per_img=cfg.TRAIN.BATCH_ROIS_OHEM,
+                                                           cls_score=ref_cls_score, bbox_pred=ref_bbox_pred, labels=ref_label,
+                                                           bbox_targets=ref_bbox_target, bbox_weights=ref_bbox_weight)
+            concat_label_ohem = mx.sym.concat(labels_ohem, ref_labels_ohem)
+            concat_bbox_weight_ohem = mx.sym.concat(bbox_weights_ohem, ref_bbox_weights_ohem)
+
+            cls_prob = mx.sym.SoftmaxOutput(name='cls_prob', data=concat_cls_score, label=concat_labels_ohem, normalization='valid', use_ignore=True, ignore_label=-1)
+            bbox_loss_ = concat_bbox_weights_ohem * mx.sym.smooth_l1(name='bbox_loss_', scalar=1.0, data=(concat_bbox_pred - concat_bbox_target))
+            bbox_loss = mx.sym.MakeLoss(name='bbox_loss', data=bbox_loss_, grad_scale=1.0 / cfg.TRAIN.BATCH_ROIS_OHEM)
+            rcnn_label = labels_ohem
+        else:
+            cls_prob = mx.sym.SoftmaxOutput(name='cls_prob', data=concat_cls_score, label=concat_label, normalization='valid')
+            bbox_loss_ = concat_bbox_weight * mx.sym.smooth_l1(name='bbox_loss_', scalar=1.0, data=(concat_bbox_pred - concat_bbox_target))
+            bbox_loss = mx.sym.MakeLoss(name='bbox_loss', data=bbox_loss_, grad_scale=1.0 / cfg.TRAIN.BATCH_ROIS)
+            rcnn_label = concat_label
+
+        # reshape output
+        rcnn_label = mx.sym.Reshape(data=rcnn_label, shape=(cfg.TRAIN.BATCH_IMAGES, -1), name='label_reshape')
+        cls_prob = mx.sym.Reshape(data=cls_prob, shape=(cfg.TRAIN.BATCH_IMAGES, -1, num_classes), name='cls_prob_reshape')
+        bbox_loss = mx.sym.Reshape(data=bbox_loss, shape=(cfg.TRAIN.BATCH_IMAGES, -1, 4 * num_reg_classes), name='bbox_loss_reshape')
+
+        output_sym_list = [concat_rpn_cls_prob, concat_rpn_bbox_loss, cls_prob, bbox_loss, mx.sym.BlockGrad(rcnn_label)]
+
+        self.sym = mx.sym.Group(output_sym_list)
+        return self.sym
+
+
     def init_weight_attention_nms_multi_head(self, cfg, arg_params, aux_params, index=1):
         arg_params['nms_pair_pos_fc1_' + str(index) + '_weight'] = mx.random.normal(
             0, 0.01, shape=self.arg_shape_dict['nms_pair_pos_fc1_' + str(index) + '_weight'])
@@ -2255,7 +2529,7 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
         arg_params['bbox_pred_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['bbox_pred_bias'])
 
     def init_weight(self, cfg, arg_params, aux_params):
-        self.init_weight_nms(self, arg_params, aux_params, 1)
-        self.init_weight_nms(self, arg_params, aux_params, 2)
+        # self.init_weight_nms(self, arg_params, aux_params, 1)
+        # self.init_weight_nms(self, arg_params, aux_params, 2)
         self.init_weight_rpn(self, arg_params, aux_params)
         self.init_weight_rcnn(self, arg_params, aux_params)

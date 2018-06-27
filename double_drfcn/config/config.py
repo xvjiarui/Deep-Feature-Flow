@@ -156,7 +156,7 @@ config.TEST.RPN_MIN_SIZE = config.network.RPN_FEAT_STRIDE
 config.TEST.SOFTNMS = False
 # whether to use LEARN_NMS
 config.TEST.LEARN_NMS = False
-config.TEST.FIRST_N = 0
+config.TEST.FIRST_N = 100
 config.TEST.MERGE_METHOD = -1
 
 # RCNN nms

@@ -228,6 +228,8 @@ def pred_eval(gpu_id, key_predictor, cur_predictor, test_data, imdb, cfg, vis=Fa
                  for _ in range(imdb.num_classes)]
     frame_ids = np.zeros(num_images, dtype=np.int)
 
+    import pdb
+    pdb.set_trace()
     roidb_idx = -1
     roidb_offset = -1
     idx = 0

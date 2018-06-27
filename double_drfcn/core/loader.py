@@ -17,7 +17,7 @@ from mxnet.executor_manager import _split_input_slice
 
 from config.config import config
 from utils.image import tensor_vstack
-from rpn.rpn import get_rpn_testbatch, get_rpn_pair_batch, get_rpn_double_batch, assign_anchor
+from rpn.rpn import get_rpn_testbatch, get_rpn_pair_batch, get_rpn_double_batch, assign_anchor, get_rpn_double_testbatch
 from rcnn import get_rcnn_testbatch, get_rcnn_batch
 
 class TestLoader(mx.io.DataIter):
@@ -37,22 +37,20 @@ class TestLoader(mx.io.DataIter):
         self.index = np.arange(self.size)
 
         # decide data and label names (only for training)
-        self.data_name = ['data', 'im_info', 'data_key', 'feat_key']
+        self.data_name = ['data', 'ref_data', 'im_info', 'ref_im_info']
         self.label_name = None
-
-        #
-        self.cur_roidb_index = 0
-        self.cur_frameid = 0
-        self.data_key = None
-        self.key_frameid = 0
-        self.cur_seg_len = 0
-        self.key_frame_flag = -1
 
         # status variable for synchronization between get_data and get_label
         self.cur = 0
         self.data = None
         self.label = []
         self.im_info = None
+        self.ref_im_info = None
+
+        #
+        self.cur_roidb_index = 0
+        self.cur_frameid = 0
+        self.cur_seg_len = 0
 
         # get first batch to fill in provide_data and provide_label
         self.reset()
@@ -90,10 +88,7 @@ class TestLoader(mx.io.DataIter):
             if self.cur_frameid == self.cur_seg_len:
                 self.cur_roidb_index += 1
                 self.cur_frameid = 0
-                self.key_frameid = 0
-            elif self.cur_frameid - self.key_frameid == self.cfg.TEST.KEY_FRAME_INTERVAL:
-                self.key_frameid = self.cur_frameid
-            return self.im_info, self.key_frame_flag, mx.io.DataBatch(data=self.data, label=self.label,
+            return self.im_info, self.ref_im_info, mx.io.DataBatch(data=self.data, label=self.label,
                                    pad=self.getpad(), index=self.getindex(),
                                    provide_data=self.provide_data, provide_label=self.provide_label)
         else:
@@ -112,21 +107,12 @@ class TestLoader(mx.io.DataIter):
         cur_roidb = self.roidb[self.cur_roidb_index].copy()
         cur_roidb['image'] = cur_roidb['pattern'] % self.cur_frameid
         self.cur_seg_len = cur_roidb['frame_seg_len']
-        data, label, im_info = get_rpn_testbatch([cur_roidb], self.cfg)
-        if self.key_frameid == self.cur_frameid: # key frame
-            self.data_key = data[0]['data'].copy()
-            if self.key_frameid == 0:
-                self.key_frame_flag = 0
-            else:
-                self.key_frame_flag = 1
-        else:
-            self.key_frame_flag = 2
-        extend_data = [{'data': data[0]['data'],
-                        'im_info': data[0]['im_info'],
-                        'data_key': self.data_key,
-                        'feat_key': np.zeros((1,self.cfg.network.DFF_FEAT_DIM,1,1))}]
-        self.data = [[mx.nd.array(extend_data[i][name]) for name in self.data_name] for i in xrange(len(data))]
+        data, label, im_info, ref_im_info = get_rpn_double_testbatch([cur_roidb], self.cfg)
+        self.data = [[mx.nd.array(idata[name]) for name in self.data_name] for idata in data]
+
         self.im_info = im_info
+        self.ref_im_info = ref_im_info
+
 
 class AnchorLoader(mx.io.DataIter):
 
