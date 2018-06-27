@@ -52,7 +52,28 @@ def get_rpn_double_testbatch(roidb, cfg):
             'ref_data': ref_im_array[i],
             'ref_im_info': ref_im_info[i]
                 } for i in range(len(roidb))]
-    label = {}
+
+    label = []
+    for i in range(len(roidb)):
+        if roidb[i]['gt_classes'].size > 0:
+            gt_inds = np.where(roidb[i]['gt_classes'] != 0)[0]
+            gt_boxes = np.empty((roidb[i]['boxes'].shape[0], 5), dtype=np.float32)
+            gt_boxes[:, 0:4] = roidb[i]['boxes'][gt_inds, :]
+            gt_boxes[:, 4] = roidb[i]['gt_classes'][gt_inds]
+        else:
+            gt_boxes = np.empty((0, 5), dtype=np.float32)
+
+        if ref_roidb[i]['gt_classes'].size > 0:
+            gt_inds = np.where(ref_roidb[i]['gt_classes'] != 0)[0]
+            ref_gt_boxes = np.empty((ref_roidb[i]['boxes'].shape[0], 5), dtype=np.float32)
+            ref_gt_boxes[:, 0:4] = ref_roidb[i]['boxes'][gt_inds, :]
+            ref_gt_boxes[:, 4] = ref_roidb[i]['gt_classes'][gt_inds]
+        else:
+            ref_gt_boxes = np.empty((0, 5), dtype=np.float32)
+
+        label.append({'gt_boxes': gt_boxes,
+                    'ref_gt_boxes': ref_gt_boxes})
+
     return data, label, im_info, ref_im_info
 
 

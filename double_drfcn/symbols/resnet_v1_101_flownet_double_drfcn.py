@@ -2127,6 +2127,9 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
         ref_data = mx.sym.Variable(name="ref_data")
         ref_im_info = mx.sym.Variable(name="ref_im_info")
 
+        gt_boxes = mx.sym.Variable(name='gt_boxes')
+        ref_gt_boxes = mx.sym.Variable(name='ref_gt_boxes')
+
 
         im_info_list = [im_info, ref_im_info]
 
@@ -2259,6 +2262,12 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
         # sorted_score_reshape = mx.sym.BlockGrad(sorted_score_reshape)
         concat_nms_multi_score = mx.sym.broadcast_mul(lhs=concat_sorted_score_reshape, rhs=concat_nms_conditional_score)
 
+        nms_multi_target = mx.sym.Custom(bbox=sorted_bbox, gt_bbox=gt_boxes, 
+                                         score=sorted_score,
+                                         bbox_bef=ref_sorted_bbox, gt_bbox_bef = ref_gt_boxes, 
+                                         score_bef = ref_sorted_score,
+                                         op_type='nms_multi_target', target_thresh=nms_target_thresh)
+
         if cfg.TEST.MERGE_METHOD == -1:
             nms_final_score = mx.sym.mean(data=concat_nms_multi_score, axis=2, name='nms_final_score')
         elif cfg.TEST.MERGE_METHOD == -2:
@@ -2273,11 +2282,13 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
         output_sym_list.append(concat_sorted_bbox)
         output_sym_list.append(concat_sorted_score)
         output_sym_list.append(nms_final_score)
+        output_sym_list.append(nms_multi_target)
 
 
         self.sym = mx.sym.Group(output_sym_list)
         return self.sym
 
+    # train base
     def get_train_symbol(self, cfg):
 
         num_anchors = cfg.network.NUM_ANCHORS

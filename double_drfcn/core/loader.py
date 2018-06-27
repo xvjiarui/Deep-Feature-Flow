@@ -38,7 +38,7 @@ class TestLoader(mx.io.DataIter):
 
         # decide data and label names (only for training)
         self.data_name = ['data', 'ref_data', 'im_info', 'ref_im_info']
-        self.label_name = None
+        self.label_name = ['gt_boxes', 'ref_gt_boxes']
 
         # status variable for synchronization between get_data and get_label
         self.cur = 0
@@ -62,7 +62,8 @@ class TestLoader(mx.io.DataIter):
 
     @property
     def provide_label(self):
-        return [None for _ in range(len(self.data))]
+        # return [None for _ in range(len(self.data))]
+        return [[(k, v.shape) for k, v in zip(self.label_name, ilabel)] for ilabel in self.label]
 
     @property
     def provide_data_single(self):
@@ -70,7 +71,7 @@ class TestLoader(mx.io.DataIter):
 
     @property
     def provide_label_single(self):
-        return None
+        return [(k, v.shape) for k, v in zip(self.label_name, self.label[0])]
 
     def reset(self):
         self.cur = 0
@@ -109,6 +110,7 @@ class TestLoader(mx.io.DataIter):
         self.cur_seg_len = cur_roidb['frame_seg_len']
         data, label, im_info, ref_im_info = get_rpn_double_testbatch([cur_roidb], self.cfg)
         self.data = [[mx.nd.array(idata[name]) for name in self.data_name] for idata in data]
+        self.label = [[mx.nd.array(ilabel[name][np.newaxis, :, :]) for name in self.label_name] for ilabel in label]
 
         self.im_info = im_info
         self.ref_im_info = ref_im_info

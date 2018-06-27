@@ -36,7 +36,7 @@ class Predictor(object):
         self._mod.init_params(arg_params=arg_params, aux_params=aux_params)
 
     def predict(self, data_batch):
-        self._mod.forward(data_batch)
+        self._mod.forward(data_batch, True)
         # [dict(zip(self._mod.output_names, _)) for _ in zip(*self._mod.get_outputs(merge_multi_context=False))]
         return [dict(zip(self._mod.output_names, _)) for _ in zip(*self._mod.get_outputs(merge_multi_context=False))]
 
@@ -126,10 +126,11 @@ def generate_proposals(predictor, test_data, imdb, cfg, vis=False, thresh=0.):
     print 'wrote rpn proposals to {}'.format(rpn_file)
     return imdb_boxes
 
-def im_detect(predictor, data_batch, data_names, scales, cfg):
+def im_detect(predictor, data_batch, data_names, label_names, scales, cfg):
     output_all = predictor.predict(data_batch)
 
     data_dict_all = [dict(zip(data_names, idata)) for idata in data_batch.data]
+    label_dict_all = [dict(zip(label_names, ilabel)) for ilabel in data_batch.label]
     scores_all = []
     pred_boxes_all = []
     ref_scores_all = []
@@ -170,7 +171,7 @@ def im_detect(predictor, data_batch, data_names, scales, cfg):
             pred_boxes_all.append(pred_boxes)
             scores_all.append(scores)
 
-    return scores_all, pred_boxes_all, ref_scores_all, ref_pred_boxes_all, data_dict_all
+    return scores_all, pred_boxes_all, ref_scores_all, ref_pred_boxes_all, data_dict_all, label_dict_all
 
 
 def im_batch_detect(predictor, data_batch, data_names, scales, cfg):
@@ -224,6 +225,7 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
 
     assert vis or not test_data.shuffle
     data_names = [k[0] for k in test_data.provide_data[0]]
+    label_names = [k[0] for k in test_data.provide_label[0]]
     num_images = test_data.size
 
     if not isinstance(test_data, PrefetchingIter):
@@ -262,7 +264,7 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
         t = time.time()
 
         scales = [iim_info[0, 2] for iim_info in im_info]
-        scores_all, boxes_all, ref_scores_all, ref_boxes_all, data_dict_all = im_detect(predictor, data_batch, data_names, scales, cfg)
+        scores_all, boxes_all, ref_scores_all, ref_boxes_all, data_dict_all, label_dict_all = im_detect(predictor, data_batch, data_names, label_names, scales, cfg)
 
 
 
