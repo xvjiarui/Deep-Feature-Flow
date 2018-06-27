@@ -110,6 +110,8 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
             score_list = get_scores(bbox, gt_box, score)
             score_bef_list = get_scores(bbox_bef, gt_box_bef, score_bef)
 
+            import pdb
+            pdb.set_trace()
             output_list = []
             output_bef_list = []
             for cls_idx in range(0, num_fg_classes):
@@ -147,8 +149,8 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                 bbox_bef_per_class = bbox_bef[:, cls_idx, :]
 
                 if len(score_list_per_class) == 0 or len(score_bef_list_per_class) == 0:
-                   output_list.append(get_max_socre_bboxes(score_list_per_class, num_boxes))
-                   output_bef_list.append(get_max_socre_bboxes(score_bef_list_per_class, num_boxes_bef))
+                    output_list.append(get_max_socre_bboxes(score_list_per_class, num_boxes))
+                    output_bef_list.append(get_max_socre_bboxes(score_bef_list_per_class, num_boxes_bef))
                 else:
                     output_list_per_class = []
                     output_bef_list_per_class = []

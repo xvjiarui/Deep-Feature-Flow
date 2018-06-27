@@ -64,7 +64,7 @@ TRAIN:
   warmup: false
   begin_epoch: 0
   end_epoch: 2
-  model_prefix: 'double_drfcn_vid_base'
+  model_prefix: 'double_drfcn_vid_baseline'
   # whether resume training
   RESUME: false
   # whether flip image
@@ -149,4 +149,5 @@ TEST:
   NMS: 0.3
   test_epoch: 2
 
-  LEARN_NMS: false
+  LEARN_NMS: true
+  MERGE_METHOD: -2

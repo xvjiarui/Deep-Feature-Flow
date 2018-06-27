@@ -150,6 +150,12 @@ def im_detect(predictor, data_batch, data_names, label_names, scales, cfg):
             # we used scaled image & roi to train, so it is necessary to transform them back
             concat_pred_boxes = concat_pred_boxes / scale
 
+            nms_multi_target = output['custom0_nms_multi_target'].asnumpy()
+            print(np.max(nms_multi_target))
+            target_boxes = concat_pred_boxes[np.where(nms_multi_target)]
+            print(target_boxes)
+            import pdb
+            pdb.set_trace()
             pred_boxes, ref_pred_boxes = np.split(concat_pred_boxes, 2)
             scores, ref_scores = np.split(concat_nms_scores, 2)
 
@@ -321,6 +327,14 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
 
             if vis:
                 boxes_this_image = [[]] + [all_boxes[j][idx+delta] for j in range(1, imdb.num_classes)]
+                for label in label_dict_all:
+                    gt_boxes = label['gt_boxes']
+                    for gt_box in gt_boxes:
+                        gt_box = gt_box.asnumpy()
+                        gt_cls = int(gt_box[0, 4])
+                        gt_box = gt_box/scales[delta]
+                        gt_box[0, 4] = 1
+                        boxes_this_image[gt_cls] = np.vstack((boxes_this_image[gt_cls], gt_box))
                 vis_all_detection(data_dict['data'].asnumpy(), boxes_this_image, imdb.classes, scales[delta], cfg)
 
         idx += test_data.batch_size
