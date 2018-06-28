@@ -195,17 +195,18 @@ def get_double_image(roidb, config, is_train=True):
         if '.zip@' in image_path:
             im = phillyzip.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         else:
-            print('cur', image_path)
+            # print('cur', image_path)
             im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         # update annotation
         annotation = image_path.replace("Data", "Annotations").replace("JPEG","xml")
         assert os.path.exists(annotation), '{} does not exist'.format(annotation)
-        roi_rec = load_roi_rec(annotation, roi_rec)
+        if not is_train:
+            roi_rec = load_roi_rec(annotation, roi_rec)
 
         if roi_rec.has_key('pattern'):
             ref_id = min(max(roi_rec['frame_seg_id'] + np.random.randint(config.TRAIN.MIN_OFFSET, config.TRAIN.MAX_OFFSET+1), 0),roi_rec['frame_seg_len']-1)
             ref_image = roi_rec['pattern'] % ref_id
-            print('ref', ref_image)
+            # print('ref', ref_image)
             assert os.path.exists(ref_image), '{} does not exist'.format(ref_image)
 
             ref_annotation = ref_image.replace("Data", "Annotations").replace("JPEG","xml")

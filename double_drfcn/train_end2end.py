@@ -138,8 +138,7 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
         arg_params_flow, aux_params_flow = load_param(os.path.join(pretrained_dir, pretrained_flow), epoch, convert=True)
         arg_params.update(arg_params_flow)
         aux_params.update(aux_params_flow)
-
-    sym_instance.init_weight(config, arg_params, aux_params)
+        sym_instance.init_weight(config, arg_params, aux_params)
 
     # check parameter shapes
     sym_instance.check_parameter_shapes(arg_params, aux_params, data_shape_dict)
