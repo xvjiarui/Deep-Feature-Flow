@@ -188,7 +188,7 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
     off_set = 0
     while len(lr_epoch_diff) == 0:
         off_set += 1
-        lr_epoch_diff = [epoch - begin_epoch for epoch in lr_epoch if epoch + off_set> begin_epoch]
+        lr_epoch_diff = [epoch + off_set - begin_epoch for epoch in lr_epoch if epoch + off_set> begin_epoch]
     lr = base_lr * (lr_factor ** (len(lr_epoch) - len(lr_epoch_diff)))
     lr_iters = [int(epoch * len(roidb) / batch_size) for epoch in lr_epoch_diff]
     print('lr', lr, 'lr_epoch_diff', lr_epoch_diff, 'lr_iters', lr_iters)
