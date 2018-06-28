@@ -170,6 +170,9 @@ config.TEST.max_per_image = 300
 # Test Model Epoch
 config.TEST.test_epoch = 0
 
+# DFF, trained image sampled from [min_offset, max_offset]
+config.TEST.MIN_OFFSET = -9
+config.TEST.MAX_OFFSET = 0
 
 def update_config(config_file):
     exp_config = None

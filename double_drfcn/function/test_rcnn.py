@@ -105,7 +105,13 @@ def test_rcnn(cfg, dataset, image_set, root_path, dataset_path,
     # get test data iter
     test_data = TestLoader(roidb, cfg, batch_size=1, shuffle=shuffle, has_rpn=has_rpn)
     # load model
+
+    data_shape_dict = dict(test_data.provide_data_single + test_data.provide_label_single)
+    pprint.pprint(data_shape_dict)
+    sym_instance.infer_shape(data_shape_dict)
+
     arg_params, aux_params = load_param(prefix, epoch, process=True)
+    # sym_instance.init_weight(cfg, arg_params, aux_params)
 
     # create predictor
     predictor = get_predictor(sym, sym_instance, cfg, arg_params, aux_params, test_data, ctx)

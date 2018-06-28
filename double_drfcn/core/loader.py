@@ -107,6 +107,7 @@ class TestLoader(mx.io.DataIter):
     def get_batch(self):
         cur_roidb = self.roidb[self.cur_roidb_index].copy()
         cur_roidb['image'] = cur_roidb['pattern'] % self.cur_frameid
+        cur_roidb['frame_seg_id'] = self.cur_frameid
         self.cur_seg_len = cur_roidb['frame_seg_len']
         data, label, im_info, ref_im_info = get_rpn_double_testbatch([cur_roidb], self.cfg)
         self.data = [[mx.nd.array(idata[name]) for name in self.data_name] for idata in data]

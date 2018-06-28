@@ -110,8 +110,6 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
             score_list = get_scores(bbox, gt_box, score)
             score_bef_list = get_scores(bbox_bef, gt_box_bef, score_bef)
 
-            import pdb
-            pdb.set_trace()
             output_list = []
             output_bef_list = []
             for cls_idx in range(0, num_fg_classes):

@@ -41,7 +41,7 @@ def get_rpn_double_testbatch(roidb, cfg):
     :param roidb: ['image', 'flipped'] + ['gt_boxes', 'boxes', 'gt_classes']
     :return: data, label
     """
-    imgs, ref_imgs, roidb, ref_roidb = get_double_image(roidb, cfg)
+    imgs, ref_imgs, roidb, ref_roidb = get_double_image(roidb, cfg, False)
     im_array = imgs
     ref_im_array = ref_imgs
     im_info = [np.array([roidb[i]['im_info']], dtype=np.float32) for i in range(len(roidb))]

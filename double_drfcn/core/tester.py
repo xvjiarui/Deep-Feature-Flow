@@ -135,7 +135,7 @@ def im_detect(predictor, data_batch, data_names, label_names, scales, cfg):
     pred_boxes_all = []
     ref_scores_all = []
     ref_pred_boxes_all = []
-    for output, data_dict, scale in zip(output_all, data_dict_all, scales):
+    for output, data_dict, label_dict, scale in zip(output_all, data_dict_all, label_dict_all, scales):
         if cfg.TEST.HAS_RPN or cfg.network.ROIDispatch:
             concat_rois = output['concat_rois_output'].asnumpy()[:, 1:]
         else:
@@ -150,12 +150,7 @@ def im_detect(predictor, data_batch, data_names, label_names, scales, cfg):
             # we used scaled image & roi to train, so it is necessary to transform them back
             concat_pred_boxes = concat_pred_boxes / scale
 
-            nms_multi_target = output['custom0_nms_multi_target'].asnumpy()
-            print(np.max(nms_multi_target))
-            target_boxes = concat_pred_boxes[np.where(nms_multi_target)]
-            print(target_boxes)
-            import pdb
-            pdb.set_trace()
+
             pred_boxes, ref_pred_boxes = np.split(concat_pred_boxes, 2)
             scores, ref_scores = np.split(concat_nms_scores, 2)
 
@@ -164,18 +159,41 @@ def im_detect(predictor, data_batch, data_names, label_names, scales, cfg):
             scores_all.append(scores)
             ref_scores_all.append(ref_scores)
 
+            nms_multi_target = output['custom0_nms_multi_target'].asnumpy()
+            target, ref_target = np.split(nms_multi_target, 2)
+            non_ref_target_num = np.sum(np.where(target)[0] < 100)
+            concat_target_boxes = concat_pred_boxes[np.where(nms_multi_target)[:2]]
+
+            # concat_target_boxes = concat_target_boxes / scale
+
+            # construct gt style nms_multi_target, 0:30
+            concat_target_boxes = np.hstack((concat_target_boxes, np.where(nms_multi_target)[1][:, np.newaxis]))
+
+            target_boxes, ref_target_boxes = np.split(concat_target_boxes, 2)
+
+            label_dict['nms_multi_target'] = target_boxes[:, np.newaxis, :]
+            label_dict['ref_nms_multi_target'] = ref_target_boxes[:, np.newaxis, :]
+
         else:
             rois, ref_rois = np.split(concat_rois, 2)
             scores = output['cls_prob_reshape_output'].asnumpy()[0]
             bbox_deltas = output['bbox_pred_reshape_output'].asnumpy()[0]
+            ref_scores = output['cls_prob_reshape_output'].asnumpy()[1]
+            ref_bbox_deltas = output['bbox_pred_reshape_output'].asnumpy()[1]
 
             # post processing
             pred_boxes = bbox_pred(rois, bbox_deltas)
             pred_boxes = clip_boxes(pred_boxes, im_shape[-2:])
             pred_boxes /= scale
 
+            ref_pred_boxes = bbox_pred(ref_rois, ref_bbox_deltas)
+            ref_pred_boxes = clip_boxes(ref_pred_boxes, im_shape[-2:])
+            ref_pred_boxes /= scale
+
             pred_boxes_all.append(pred_boxes)
             scores_all.append(scores)
+            ref_pred_boxes_all.append(ref_pred_boxes)
+            ref_scores_all.append(ref_scores)
 
     return scores_all, pred_boxes_all, ref_scores_all, ref_pred_boxes_all, data_dict_all, label_dict_all
 
@@ -208,7 +226,7 @@ def im_batch_detect(predictor, data_batch, data_names, scales, cfg):
 
     return scores_all, pred_boxes_all, data_dict_all
 
-def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True):
+def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True, show_gt=True):
     """
     wrapper for calculating offline validation for faster data analysis
     in this example, all threshold are set by hand
@@ -219,7 +237,6 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
     :param thresh: valid detection threshold
     :return:
     """
-
     det_file = os.path.join(imdb.result_path, imdb.name + '_detections.pkl')
     if os.path.exists(det_file) and not ignore_cache:
         with open(det_file, 'rb') as fid:
@@ -256,7 +273,9 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
     #    (x1, y1, x2, y2, score)
     all_boxes = [[[] for _ in range(num_images)]
                  for _ in range(imdb.num_classes)]
-    class_lut = [[] for _ in range(imdb.num_classes)]
+    ref_all_boxes = [[[] for _ in range(num_images)]
+                 for _ in range(imdb.num_classes)]
+    # class_lut = [[] for _ in range(imdb.num_classes)]
     valid_tally = 0
     valid_sum = 0
 
@@ -273,10 +292,10 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
         scores_all, boxes_all, ref_scores_all, ref_boxes_all, data_dict_all, label_dict_all = im_detect(predictor, data_batch, data_names, label_names, scales, cfg)
 
 
-
         t2 = time.time() - t
         t = time.time()
-        for delta, (scores, boxes, data_dict) in enumerate(zip(scores_all, boxes_all, data_dict_all)):
+        # for delta, (scores, boxes, data_dict) in enumerate(zip(scores_all, boxes_all, data_dict_all)):
+        for delta, (scores, boxes, ref_scores, ref_boxes, data_dict) in enumerate(zip(scores_all, boxes_all, ref_scores_all, ref_boxes_all, data_dict_all)):
             if cfg.TEST.LEARN_NMS:
                 for j in range(1, imdb.num_classes):
                     indexes = np.where(scores[:, j-1] > thresh)[0]
@@ -285,7 +304,7 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
                     cls_dets = np.hstack((cls_boxes, cls_scores))
                     # count the valid ground truth
                     if len(cls_scores) > 0:
-                        class_lut[j].append(idx + delta)
+                        # class_lut[j].append(idx + delta)
                         valid_tally += len(cls_scores)
                         valid_sum += len(scores)
                     all_boxes[j][idx + delta] = cls_dets
@@ -302,7 +321,7 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
                     cls_boxes = boxes[indexes, 4:8] if cfg.CLASS_AGNOSTIC else boxes[indexes, j * 4:(j + 1) * 4]
                     # count the valid ground truth
                     if len(cls_scores) > 0:
-                        class_lut[j].append(idx+delta)
+                        # class_lut[j].append(idx+delta)
                         valid_tally += len(cls_scores)
                         valid_sum += len(scores)
                         # print np.min(cls_scores), valid_tally, valid_sum
@@ -327,15 +346,94 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
 
             if vis:
                 boxes_this_image = [[]] + [all_boxes[j][idx+delta] for j in range(1, imdb.num_classes)]
-                for label in label_dict_all:
-                    gt_boxes = label['gt_boxes']
-                    for gt_box in gt_boxes:
-                        gt_box = gt_box.asnumpy()
-                        gt_cls = int(gt_box[0, 4])
-                        gt_box = gt_box/scales[delta]
-                        gt_box[0, 4] = 1
-                        boxes_this_image[gt_cls] = np.vstack((boxes_this_image[gt_cls], gt_box))
-                vis_all_detection(data_dict['data'].asnumpy(), boxes_this_image, imdb.classes, scales[delta], cfg)
+                if show_gt:
+                    for label in label_dict_all:
+                        gt_boxes = label['gt_boxes']
+                        target_boxes = label['nms_multi_target']
+                        for gt_box in gt_boxes:
+                            gt_box = gt_box.asnumpy()
+                            gt_cls = int(gt_box[0, 4])
+                            gt_box = gt_box/scales[delta]
+                            gt_box[0, 4] = 1
+                            boxes_this_image[gt_cls] = np.vstack((boxes_this_image[gt_cls], gt_box))
+
+                        if cfg.TEST.LEARN_NMS:
+                            for target_box in target_boxes:
+                                print("cur", target_box)
+                                target_cls = int(target_box[0, 4])+1
+                                target_box[0, 4] = 2
+                                boxes_this_image[target_cls] = np.vstack((boxes_this_image[target_cls], target_box))
+                # vis_all_detection(data_dict['ref_data'].asnumpy(), boxes_this_image, imdb.classes, scales[delta], cfg)
+                # vis_double_all_detection(data_dict['data'].asnumpy(), boxes_this_image, data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
+            if cfg.TEST.LEARN_NMS:
+                for j in range(1, imdb.num_classes):
+                    indexes = np.where(ref_scores[:, j-1] > thresh)[0]
+                    cls_scores = ref_scores[indexes, j-1:j]
+                    cls_boxes = ref_boxes[indexes, j-1, :]
+                    cls_dets = np.hstack((cls_boxes, cls_scores))
+                    # count the valid ground truth
+                    if len(cls_scores) > 0:
+                        # class_lut[j].append(idx + delta)
+                        valid_tally += len(cls_scores)
+                        valid_sum += len(ref_scores)
+                    ref_all_boxes[j][idx + delta] = cls_dets
+            else:
+                for j in range(1, imdb.num_classes):
+                    indexes = np.where(ref_scores[:, j] > thresh)[0]
+                    if cfg.TEST.FIRST_N > 0:
+                        # todo: check whether the order affects the result
+                        sort_indices = np.argsort(ref_scores[:, j])[-cfg.TEST.FIRST_N:]
+                        # sort_indices = np.argsort(-scores[:, j])[0:cfg.TEST.FIRST_N]
+                        indexes = np.intersect1d(sort_indices, indexes)
+
+                    cls_scores = ref_scores[indexes, j, np.newaxis]
+                    cls_boxes = ref_boxes[indexes, 4:8] if cfg.CLASS_AGNOSTIC else ref_boxes[indexes, j * 4:(j + 1) * 4]
+                    # count the valid ground truth
+                    if len(cls_scores) > 0:
+                        # class_lut[j].append(idx+delta)
+                        valid_tally += len(cls_scores)
+                        valid_sum += len(ref_scores)
+                        # print np.min(cls_scores), valid_tally, valid_sum
+                        # cls_scores = scores[:, j, np.newaxis]
+                        # cls_scores[cls_scores <= thresh] = thresh
+                        # cls_boxes = boxes[:, 4:8] if cfg.CLASS_AGNOSTIC else boxes[:, j * 4:(j + 1) * 4]
+                    cls_dets = np.hstack((cls_boxes, cls_scores))
+                    if cfg.TEST.SOFTNMS:
+                        ref_all_boxes[j][idx + delta] = nms(cls_dets)
+                    else:
+                        keep = nms(cls_dets)
+                        ref_all_boxes[j][idx + delta] = cls_dets[keep, :]
+
+            if max_per_image > 0:
+                image_scores = np.hstack([ref_all_boxes[j][idx+delta][:, -1]
+                                          for j in range(1, imdb.num_classes)])
+                if len(image_scores) > max_per_image:
+                    image_thresh = np.sort(image_scores)[-max_per_image]
+                    for j in range(1, imdb.num_classes):
+                        keep = np.where(ref_all_boxes[j][idx+delta][:, -1] >= image_thresh)[0]
+                        ref_all_boxes[j][idx+delta] = ref_all_boxes[j][idx+delta][keep, :]
+
+            if vis:
+                ref_boxes_this_image = [[]] + [ref_all_boxes[j][idx+delta] for j in range(1, imdb.num_classes)]
+                if show_gt:
+                    for label in label_dict_all:
+                        gt_boxes = label['ref_gt_boxes']
+                        target_boxes = label['ref_nms_multi_target']
+                        for gt_box in gt_boxes:
+                            gt_box = gt_box.asnumpy()
+                            gt_cls = int(gt_box[0, 4])
+                            gt_box = gt_box/scales[delta]
+                            gt_box[0, 4] = 1
+                            ref_boxes_this_image[gt_cls] = np.vstack((ref_boxes_this_image[gt_cls], gt_box))
+
+                        if cfg.TEST.LEARN_NMS:
+                            for target_box in target_boxes:
+                                print("ref", target_box)
+                                target_cls = int(target_box[0, 4]) + 1
+                                target_box[0, 4] = 2
+                                ref_boxes_this_image[target_cls] = np.vstack((ref_boxes_this_image[target_cls], target_box))
+                vis_double_all_detection(data_dict['data'].asnumpy(), boxes_this_image, data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
+                # vis_all_detection(data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
 
         idx += test_data.batch_size
         t3 = time.time() - t
@@ -359,7 +457,7 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
     info_str = imdb.evaluate_detections(all_boxes)
     if logger:
         logger.info('evaluate detections: \n{}'.format(info_str))
-        num_valid_classes = [len(x) for x in class_lut]
+        # num_valid_classes = [len(x) for x in class_lut]
         logger.info('valid class ratio:{}'.format(np.sum(num_valid_classes)/float(num_images)))
         logger.info('valid score ratio:{}'.format(float(valid_tally)/float(valid_sum+0.01)))
 
@@ -387,16 +485,70 @@ def vis_all_detection(im_array, detections, class_names, scale, cfg, threshold=1
             score = det[-1]
             if score < threshold:
                 continue
-            rect = plt.Rectangle((bbox[0], bbox[1]),
-                                 bbox[2] - bbox[0],
-                                 bbox[3] - bbox[1], fill=False,
-                                 edgecolor=color, linewidth=3.5)
+            elif score > 0.9999:
+                gt_color = (random.random(), random.random(), random.random())  # generate a random color
+                rect = plt.Rectangle((bbox[0], bbox[1]),
+                                     bbox[2] - bbox[0],
+                                     bbox[3] - bbox[1], fill=False,
+                                     edgecolor=color, linewidth=3.5)
+            else:
+
+                rect = plt.Rectangle((bbox[0], bbox[1]),
+                                     bbox[2] - bbox[0],
+                                     bbox[3] - bbox[1], fill=False,
+                                     edgecolor=color, linewidth=1.5)
             plt.gca().add_patch(rect)
             plt.gca().text(bbox[0], bbox[1] - 2,
                            '{:s} {:.3f}'.format(name, score),
                            bbox=dict(facecolor=color, alpha=0.5), fontsize=12, color='white')
     plt.show()
 
+def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections, class_names, scale, cfg, threshold=1e-4):
+    """
+    visualize all detections in one image
+    :param im_array: [b=1 c h w] in rgb
+    :param detections: [ numpy.ndarray([[x1 y1 x2 y2 score]]) for j in classes ]
+    :param class_names: list of names in imdb
+    :param scale: visualize the scaled image
+    :return:
+    """
+    import matplotlib.pyplot as plt
+    import random
+    im = image.transform_inverse(im_array, cfg.network.PIXEL_MEANS)
+    ref_im = image.transform_inverse(ref_im_array, cfg.network.PIXEL_MEANS)
+    fig, axeslist = plt.subplots(ncols=1, nrows=2, figsize=(8, 8))
+    figures = {'cur': im, 'ref': ref_im}
+    detections_dict = {'cur': detections, 'ref': ref_detections}
+    for ind, title in enumerate(figures):
+        im = figures[title]
+        detections = detections_dict[title]
+        axeslist.ravel()[ind].imshow(im)
+        axeslist.ravel()[ind].set_title(title)
+        axeslist.ravel()[ind].set_axis_off()
+        for j, name in enumerate(class_names):
+            if name == '__background__':
+                continue
+            color = (random.random(), random.random(), random.random())  # generate a random color
+            dets = detections[j]
+            for det in dets:
+                bbox = det[:4] * scale
+                score = det[-1]
+                if score < threshold:
+                    continue
+                linewidth = 0.5 
+                if score == 1:
+                    linewidth = 3.5
+                elif score == 2:
+                    linewidth = 1.5
+                rect = plt.Rectangle((bbox[0], bbox[1]),
+                                     bbox[2] - bbox[0],
+                                     bbox[3] - bbox[1], fill=False,
+                                     edgecolor=color, linewidth=linewidth)
+                axeslist.ravel()[ind].add_patch(rect)
+                axeslist.ravel()[ind].text(bbox[0], bbox[1] - 2,
+                               '{:s} {:.3f}'.format(name, score),
+                               bbox=dict(facecolor=color, alpha=0.5), fontsize=12, color='white')
+    plt.show()
 
 def draw_all_detection(im_array, detections, class_names, scale, cfg, threshold=1e-1):
     """
@@ -471,112 +623,3 @@ def double_im_detect(predictor, data_batch, data_names, cfg):
 
     return scores_all, pred_boxes_all, ref_scores_all, ref_pred_boxes_all, data_dict_all
 
-def train_eval(gpu_id, predictor, train_data, imdb, cfg, vis=False, thresh=1e-4, logger=None, ignore_cache=True):
-    """
-    wrapper for calculating offline validation for faster data analysis
-    in this example, all threshold are set by hand
-    :param predictor: Predictor
-    :param test_data: data iterator, must be non-shuffle
-    :param imdb: image database
-    :param vis: controls visualization
-    :param thresh: valid detection threshold
-    :return:
-    """
-
-    det_file = os.path.join(imdb.result_path, imdb.name + '_'+ str(gpu_id) + '_detections.pkl')
-    if os.path.exists(det_file) and not ignore_cache:
-        with open(det_file, 'rb') as fid:
-            all_boxes, frame_ids = cPickle.load(fid)
-        return all_boxes, frame_ids
-
-    assert vis or not train_data.shuffle
-    data_names = [k[0] for k in train_data.provide_data[0]]
-    num_images = train_data.size
-    roidb_frame_ids = [x['frame_id'] for x in train_data.roidb]
-
-    if not isinstance(train_data, PrefetchingIter):
-        train_data = PrefetchingIter(train_data)
-
-    nms = py_nms_wrapper(cfg.TEST.NMS)
-
-    # limit detections to max_per_image over all classes
-    max_per_image = cfg.TEST.max_per_image
-
-    # all detections are collected into:
-    #    all_boxes[cls][image] = N x 5 array of detections in
-    #    (x1, y1, x2, y2, score)
-    all_boxes = [[[] for _ in range(num_images)]
-                 for _ in range(imdb.num_classes)]
-    frame_ids = np.zeros(num_images, dtype=np.int)
-
-    roidb_idx = -1
-    roidb_offset = -1
-    idx = 0
-    data_time, net_time, post_time = 0.0, 0.0, 0.0
-    t = time.time()
-    for data_batch in train_data:
-        t1 = time.time() - t
-        t = time.time()
-
-        scores_all, boxes_all, ref_scores_all, ref_pred_boxes_all, data_dict_all = double_im_detect(predictor, data_batch, data_names, cfg)
-
-        t2 = time.time() - t
-        t = time.time()
-        for delta, (scores, boxes, data_dict) in enumerate(zip(scores_all, boxes_all, data_dict_all)):
-            for j in range(1, imdb.num_classes):
-                indexes = np.where(scores[:, j] > thresh)[0]
-                cls_scores = scores[indexes, j, np.newaxis]
-                cls_boxes = boxes[indexes, 4:8] if cfg.CLASS_AGNOSTIC else boxes[indexes, j * 4:(j + 1) * 4]
-                cls_dets = np.hstack((cls_boxes, cls_scores))
-                keep = nms(cls_dets)
-                all_boxes[j][idx+delta] = cls_dets[keep, :]
-
-            if max_per_image > 0:
-                image_scores = np.hstack([all_boxes[j][idx+delta][:, -1]
-                                          for j in range(1, imdb.num_classes)])
-                if len(image_scores) > max_per_image:
-                    image_thresh = np.sort(image_scores)[-max_per_image]
-                    for j in range(1, imdb.num_classes):
-                        keep = np.where(all_boxes[j][idx+delta][:, -1] >= image_thresh)[0]
-                        all_boxes[j][idx+delta] = all_boxes[j][idx+delta][keep, :]
-
-            if vis:
-                boxes_this_image = [[]] + [all_boxes[j][idx+delta] for j in range(1, imdb.num_classes)]
-                vis_all_detection(data_dict['data'].asnumpy(), boxes_this_image, imdb.classes, scales[delta], cfg)
-
-        for delta, (scores, boxes, data_dict) in enumerate(zip(ref_scores_all, ref_boxes_all, data_dict_all)):
-            for j in range(1, imdb.num_classes):
-                indexes = np.where(scores[:, j] > thresh)[0]
-                cls_scores = scores[indexes, j, np.newaxis]
-                cls_boxes = boxes[indexes, 4:8] if cfg.CLASS_AGNOSTIC else boxes[indexes, j * 4:(j + 1) * 4]
-                cls_dets = np.hstack((cls_boxes, cls_scores))
-                keep = nms(cls_dets)
-                all_boxes[j][idx+delta] = cls_dets[keep, :]
-
-            if max_per_image > 0:
-                image_scores = np.hstack([all_boxes[j][idx+delta][:, -1]
-                                          for j in range(1, imdb.num_classes)])
-                if len(image_scores) > max_per_image:
-                    image_thresh = np.sort(image_scores)[-max_per_image]
-                    for j in range(1, imdb.num_classes):
-                        keep = np.where(all_boxes[j][idx+delta][:, -1] >= image_thresh)[0]
-                        all_boxes[j][idx+delta] = all_boxes[j][idx+delta][keep, :]
-
-            if vis:
-                boxes_this_image = [[]] + [all_boxes[j][idx+delta] for j in range(1, imdb.num_classes)]
-                vis_all_detection(data_dict['ref_data'].asnumpy(), boxes_this_image, imdb.classes, scales[delta], cfg)
-
-        idx += test_data.batch_size
-        t3 = time.time() - t
-        t = time.time()
-        data_time += t1
-        net_time += t2
-        post_time += t3
-        print 'testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images, data_time / idx * test_data.batch_size, net_time / idx * test_data.batch_size, post_time / idx * test_data.batch_size)
-        if logger:
-            logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images, data_time / idx * test_data.batch_size, net_time / idx * test_data.batch_size, post_time / idx * test_data.batch_size))
-
-    with open(det_file, 'wb') as f:
-        cPickle.dump((all_boxes, frame_ids), f, protocol=cPickle.HIGHEST_PROTOCOL)
-
-    return all_boxes, frame_ids

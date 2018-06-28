@@ -2141,6 +2141,11 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
 
         concat_data = mx.sym.concat(data, ref_data, dim=0)
         concat_rpn_cls_score, concat_rpn_bbox_pred, concat_rcnn_feat = self.get_rpn_symbol(concat_data, cfg)
+        # rpn_cls_score, rpn_bbox_pred, rcnn_feat = self.get_rpn_symbol(data, cfg)
+        # ref_rpn_cls_score, ref_rpn_bbox_pred, ref_rcnn_feat = self.get_rpn_symbol(ref_data, cfg)
+        # concat_rpn_cls_score = mx.sym.concat(rpn_cls_score, ref_rpn_cls_score, dim=0)
+        # concat_rpn_bbox_pred = mx.sym.concat(rpn_bbox_pred, ref_rpn_bbox_pred, dim=0)
+        # concat_rcnn_feat = mx.sym.concat(rcnn_feat, ref_rcnn_feat, dim=0)
 
         # prepare rpn data
         concat_rpn_cls_score_reshape = mx.sym.Reshape(
@@ -2260,7 +2265,10 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
                                               act_type='sigmoid', name='nms_conditional_score')
         concat_sorted_score_reshape = mx.sym.expand_dims(concat_sorted_score, axis=2)
         # sorted_score_reshape = mx.sym.BlockGrad(sorted_score_reshape)
-        concat_nms_multi_score = mx.sym.broadcast_mul(lhs=concat_sorted_score_reshape, rhs=concat_nms_conditional_score)
+
+        # testing nms_multi_target
+        # concat_nms_multi_score = mx.sym.broadcast_mul(lhs=concat_sorted_score_reshape, rhs=concat_nms_conditional_score)
+        concat_nms_multi_score = concat_sorted_score_reshape
 
         nms_multi_target = mx.sym.Custom(bbox=sorted_bbox, gt_bbox=gt_boxes, 
                                          score=sorted_score,
@@ -2540,7 +2548,7 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
         arg_params['bbox_pred_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['bbox_pred_bias'])
 
     def init_weight(self, cfg, arg_params, aux_params):
-        # self.init_weight_nms(self, arg_params, aux_params, 1)
-        # self.init_weight_nms(self, arg_params, aux_params, 2)
-        self.init_weight_rpn(self, arg_params, aux_params)
-        self.init_weight_rcnn(self, arg_params, aux_params)
+        self.init_weight_nms(self, arg_params, aux_params, 1)
+        self.init_weight_nms(self, arg_params, aux_params, 2)
+        # self.init_weight_rpn(self, arg_params, aux_params)
+        # self.init_weight_rcnn(self, arg_params, aux_params)
