@@ -31,6 +31,7 @@ def parse_args():
 
     # modfication for philly
     if config.USE_PHILLY:
+        # not working actually
         config.gpus = '0,1,2,3,4,5,6,7'
         parser.add_argument('--dataDir', help='input directory for Philly jobs', required=True, type=str)
         parser.add_argument('--modelDir', help='output directory for Philly jobs', required=True, type=str)
@@ -183,6 +184,11 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
     lr_factor = config.TRAIN.lr_factor
     lr_epoch = [float(epoch) for epoch in lr_step.split(',')]
     lr_epoch_diff = [epoch - begin_epoch for epoch in lr_epoch if epoch > begin_epoch]
+    # hacking for auto resume
+    off_set = 0
+    while len(lr_epoch_diff) == 0:
+        off_set += 1
+        lr_epoch_diff = [epoch - begin_epoch for epoch in lr_epoch if epoch + off_set> begin_epoch]
     lr = base_lr * (lr_factor ** (len(lr_epoch) - len(lr_epoch_diff)))
     lr_iters = [int(epoch * len(roidb) / batch_size) for epoch in lr_epoch_diff]
     print('lr', lr, 'lr_epoch_diff', lr_epoch_diff, 'lr_iters', lr_iters)
@@ -204,10 +210,13 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
             optimizer='sgd', optimizer_params=optimizer_params,
             arg_params=arg_params, aux_params=aux_params, begin_epoch=begin_epoch, num_epoch=end_epoch)
 
-
 def main():
     print('Called with argument:', args)
+    if args.usePhilly:
+        config.gpus = '0,1,2,3,4,5,6,7'
+        config.USE_PHILLY = True
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
+    print('gpus', ctx)
     train_net(args, ctx, config.network.pretrained_dir, config.network.pretrained_resnet, config.network.pretrained_flow, config.network.pretrained_epoch, config.TRAIN.model_prefix,
               config.TRAIN.begin_epoch, config.TRAIN.end_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
 
