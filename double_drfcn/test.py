@@ -36,6 +36,7 @@ def parse_args():
 
     # rcnn
     parser.add_argument('--vis', help='turn on visualization', action='store_true')
+    parser.add_argument('--show_gt', help='turn on visualization on gt', action='store_true')
     parser.add_argument('--ignore_cache', help='ignore cached results boxes', action='store_true')
     parser.add_argument('--thresh', help='valid detection threshold', default=1e-4, type=float)
     parser.add_argument('--shuffle', help='shuffle data on visualization', action='store_true')
@@ -61,8 +62,8 @@ def main():
     #           ctx, os.path.join(final_output_path, '..', '_'.join([iset for iset in config.dataset.image_set.split('+')]), config.TRAIN.model_prefix), config.TEST.test_epoch,
     #           args.vis, args.ignore_cache, args.shuffle, config.TEST.HAS_RPN, config.dataset.proposal, args.thresh, logger=logger, output_path=final_output_path)
     test_rcnn(config, config.dataset.dataset, config.dataset.test_image_set, config.dataset.root_path, config.dataset.dataset_path,
-              ctx, os.path.join('./model', 'double_drfcn_vid_baseline'), 1,
-              args.vis, args.ignore_cache, args.shuffle, config.TEST.HAS_RPN, config.dataset.proposal, args.thresh, logger=logger, output_path=final_output_path)
+              ctx, os.path.join('./model', 'double_drfcn_vid_baseline'), 3,
+              args.vis, args.show_gt, args.ignore_cache, args.shuffle, config.TEST.HAS_RPN, config.dataset.proposal, args.thresh, logger=logger, output_path=final_output_path)
 
 if __name__ == '__main__':
     main()

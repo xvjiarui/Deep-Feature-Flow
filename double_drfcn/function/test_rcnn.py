@@ -88,7 +88,7 @@ def test_rcnn_(cfg, dataset, image_set, root_path, dataset_path,
 
 def test_rcnn(cfg, dataset, image_set, root_path, dataset_path,
               ctx, prefix, epoch,
-              vis, ignore_cache, shuffle, has_rpn, proposal, thresh, logger=None, output_path=None):
+              vis, show_gt, ignore_cache, shuffle, has_rpn, proposal, thresh, logger=None, output_path=None):
     if not logger:
         assert False, 'require a logger'
 
@@ -118,4 +118,4 @@ def test_rcnn(cfg, dataset, image_set, root_path, dataset_path,
 
     # start detection
     #pred_eval(0, key_predictors[0], cur_predictors[0], test_datas[0], imdb, cfg, vis=vis, ignore_cache=ignore_cache, thresh=thresh, logger=logger)
-    pred_eval(predictor, test_data, imdb, cfg, vis=vis, ignore_cache=ignore_cache, thresh=thresh, logger=logger)
+    pred_eval(predictor, test_data, imdb, cfg, vis=vis, show_gt=show_gt, ignore_cache=ignore_cache, thresh=thresh, logger=logger)

@@ -226,7 +226,7 @@ def im_batch_detect(predictor, data_batch, data_names, scales, cfg):
 
     return scores_all, pred_boxes_all, data_dict_all
 
-def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True, show_gt=True):
+def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True, show_gt=False):
     """
     wrapper for calculating offline validation for faster data analysis
     in this example, all threshold are set by hand
@@ -516,7 +516,8 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
     import random
     im = image.transform_inverse(im_array, cfg.network.PIXEL_MEANS)
     ref_im = image.transform_inverse(ref_im_array, cfg.network.PIXEL_MEANS)
-    fig, axeslist = plt.subplots(ncols=1, nrows=2, figsize=(8, 8))
+    fig, axeslist = plt.subplots(ncols=2, nrows=2, figsize=(10, 8), tight_layout={'pad': 0})
+
     figures = {'cur': im, 'ref': ref_im}
     detections_dict = {'cur': detections, 'ref': ref_detections}
     for ind, title in enumerate(figures):
@@ -533,7 +534,37 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
             for det in dets:
                 bbox = det[:4] * scale
                 score = det[-1]
-                if score < threshold:
+                if score < threshold or score==1 or score == 2:
+                    continue
+                linewidth = 0.5 
+                # if score == 1:
+                #     linewidth = 3.5
+                # elif score == 2:
+                #     linewidth = 1.5
+                rect = plt.Rectangle((bbox[0], bbox[1]),
+                                     bbox[2] - bbox[0],
+                                     bbox[3] - bbox[1], fill=False,
+                                     edgecolor=color, linewidth=linewidth, alpha=0.7)
+                axeslist.ravel()[ind].add_patch(rect)
+                axeslist.ravel()[ind].text(bbox[0], bbox[1] - 2,
+                               '{:s} {:.3f}'.format(name, score),
+                               bbox=dict(facecolor=color, alpha=0.5), fontsize=12, color='white')
+    for i, title in enumerate(figures):
+        ind = i+2
+        im = figures[title]
+        detections = detections_dict[title]
+        axeslist.ravel()[ind].imshow(im)
+        axeslist.ravel()[ind].set_title(title)
+        axeslist.ravel()[ind].set_axis_off()
+        for j, name in enumerate(class_names):
+            if name == '__background__':
+                continue
+            color = (random.random(), random.random(), random.random())  # generate a random color
+            dets = detections[j]
+            for det in dets:
+                bbox = det[:4] * scale
+                score = det[-1]
+                if score < 1.1:
                     continue
                 linewidth = 0.5 
                 if score == 1:
@@ -543,11 +574,12 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
                 rect = plt.Rectangle((bbox[0], bbox[1]),
                                      bbox[2] - bbox[0],
                                      bbox[3] - bbox[1], fill=False,
-                                     edgecolor=color, linewidth=linewidth)
+                                     edgecolor=color, linewidth=linewidth, alpha=0.7)
                 axeslist.ravel()[ind].add_patch(rect)
                 axeslist.ravel()[ind].text(bbox[0], bbox[1] - 2,
                                '{:s} {:.3f}'.format(name, score),
                                bbox=dict(facecolor=color, alpha=0.5), fontsize=12, color='white')
+    # plt.subplots_adjust(wspace=0, hspace=0.05)
     plt.show()
 
 def draw_all_detection(im_array, detections, class_names, scale, cfg, threshold=1e-1):

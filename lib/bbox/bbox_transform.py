@@ -172,7 +172,7 @@ def translation_dist(src_boxes, dst_boxes):
     determine distance between src_boxes and dst_boxes
     :param boxes: n * 4 bounding boxes
     :param query_boxes: k * 4 bounding boxes
-    :return: overlaps: n * k dist
+    :return: overlaps: n * k * 4 dist mat
     """
     n_ = src_boxes.shape[0]
     k_ = dst_boxes.shape[0]

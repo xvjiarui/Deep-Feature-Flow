@@ -9,6 +9,12 @@ import phillyzip
 
 num_empty_gt = 0
 # TODO: This two functions should be merged with individual data loader
+def imread(image_path, arg):
+    if '.zip@' in image_path:
+        im = phillyzip.imread(image_path, arg)
+    else:
+        im = cv2.imread(image_path, arg)
+    return im
 def get_image(roidb, config):
     """
     preprocess image and return processed roidb
@@ -26,10 +32,11 @@ def get_image(roidb, config):
         roi_rec = roidb[i]
         image_path = roi_rec['image']
         assert os.path.exists(roi_rec['image']), '{} does not exist'.format(roi_rec['image'])
-        if '.zip@' in image_path:
-            im = phillyzip.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
-        else:
-            im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        # if '.zip@' in image_path:
+        #     im = phillyzip.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        # else:
+        #     im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        im = imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         if roidb[i]['flipped']:
             im = im[:, ::-1, :]
         new_rec = roi_rec.copy()
@@ -66,16 +73,17 @@ def get_pair_image(roidb, config):
         eq_flag = 0 # 0 for unequal, 1 for equal
         image_path = roi_rec['image']
         assert os.path.exists(roi_rec['image']), '{} does not exist'.format(roi_rec['image'])
-        if '.zip@' in image_path:
-            im = phillyzip.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
-        else:
-            im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        # if '.zip@' in image_path:
+        #     im = phillyzip.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        # else:
+        #     im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        im = imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
 
         if roi_rec.has_key('pattern'):
             ref_id = min(max(roi_rec['frame_seg_id'] + np.random.randint(config.TRAIN.MIN_OFFSET, config.TRAIN.MAX_OFFSET+1), 0),roi_rec['frame_seg_len']-1)
             ref_image = roi_rec['pattern'] % ref_id
             assert os.path.exists(ref_image), '{} does not exist'.format(ref_image)
-            ref_im = cv2.imread(ref_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+            ref_im = imread(ref_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
             if ref_id == roi_rec['frame_seg_id']:
                 eq_flag = 1
         else:
@@ -192,11 +200,12 @@ def get_double_image(roidb, config, is_train=True):
 
         image_path = roi_rec['image']
         assert os.path.exists(roi_rec['image']), '{} does not exist'.format(roi_rec['image'])
-        if '.zip@' in image_path:
-            im = phillyzip.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
-        else:
-            # print('cur', image_path)
-            im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        # if '.zip@' in image_path:
+        #     im = phillyzip.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        # else:
+        #     # print('cur', image_path)
+        #     im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+        im = imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         # update annotation
         annotation = image_path.replace("Data", "Annotations").replace("JPEG","xml")
         assert os.path.exists(annotation), '{} does not exist'.format(annotation)
@@ -226,7 +235,7 @@ def get_double_image(roidb, config, is_train=True):
                 num_empty_gt += 1
                 print "empty gt {}".format(num_empty_gt)
 
-            ref_im = cv2.imread(ref_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
+            ref_im = imread(ref_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         else:
             ref_im = im.copy()
             ref_roi_rec = roi_rec.copy()

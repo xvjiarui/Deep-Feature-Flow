@@ -166,6 +166,7 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             continue
                         dist_mat = translation_dist(bbox_per_class[valid_bbox_indices], valid_gt_box[:, :-1])
                         dist_bef_mat = translation_dist(bbox_bef_per_class[valid_bbox_bef_indices], valid_gt_bef_box[:, :-1])
+                        # pdb.set_trace()
                         for x in range(num_valid_gt):
                             dist_mat_shape = (bbox_per_class[valid_bbox_indices].shape[0], 
                                 bbox_bef_per_class[valid_bbox_bef_indices].shape[0], 4)
