@@ -58,7 +58,7 @@ dataset:
   dataset_path: "./data/ILSVRC2015"
   image_set: DET_train_30classes+VID_train_15frames
   root_path: "./data"
-  test_image_set: VID_val_videos
+  test_image_set: VID_val_videos_small
   proposal: rpn
 TRAIN:
   lr: 0.00025

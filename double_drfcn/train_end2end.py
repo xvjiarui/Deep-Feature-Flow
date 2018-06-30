@@ -122,10 +122,10 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
         mod._preload_opt_states = '{}-{:04d}.states'.format(prefix, begin_epoch)
         print('continue training from ', begin_epoch)
         logger.info('continue training from ', begin_epoch)
-        sym_instance.init_weight(config, arg_params, aux_params)
-        print('init nms')
-        logger.info('init nms')
         params_loaded = True
+        # sym_instance.init_weight(config, arg_params, aux_params)
+        # print('init nms')
+        # logger.info('init nms')
     elif config.TRAIN.AUTO_RESUME:
         for cur_epoch in range(end_epoch-1, begin_epoch, -1):
             params_filename = '{}-{:04d}.params'.format(prefix, cur_epoch)

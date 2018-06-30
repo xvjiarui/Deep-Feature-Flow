@@ -2235,13 +2235,32 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
         cls_score, ref_cls_score = mx.sym.split(concat_cls_score, axis=0, num_outputs=2)
         bbox_pred, ref_bbox_pred = mx.sym.split(concat_bbox_pred, axis=0, num_outputs=2)
 
-        sorted_bbox, sorted_score, nms_embedding_feat = self.get_sorted_bbox_symbol(cfg, rois, cls_score, bbox_pred, fc_all_2_relu, im_info, 1, is_train=False)
-        ref_sorted_bbox, ref_sorted_score, ref_nms_embedding_feat = self.get_sorted_bbox_symbol(cfg, ref_rois, ref_cls_score, ref_bbox_pred, ref_fc_all_2_relu, ref_im_info, 2, is_train=False)
+        sorted_bbox, sorted_score, nms_rank_embedding, first_rank_indices = self.get_sorted_bbox_symbol(cfg, rois, cls_score, bbox_pred, im_info, 1)
+        ref_sorted_bbox, ref_sorted_score, ref_nms_rank_embedding, ref_first_rank_indices = self.get_sorted_bbox_symbol(cfg, ref_rois, ref_cls_score, ref_bbox_pred, ref_im_info, 2)
 
         concat_sorted_bbox = mx.sym.concat(sorted_bbox, ref_sorted_bbox, dim=0, name='concat_sorted_bbox')
         concat_sorted_score = mx.sym.concat(sorted_score, ref_sorted_score, dim=0, name='concat_sorted_score')
-        concat_nms_embedding_feat = mx.sym.concat(nms_embedding_feat, ref_nms_embedding_feat, dim=0)
+        concat_nms_rank_embedding = mx.sym.concat(nms_rank_embedding, ref_nms_rank_embedding, dim=0)
 
+
+        # nms_rank_feat, [first_n, 1024]
+        concat_nms_rank_feat = mx.sym.FullyConnected(name='nms_rank', data=concat_nms_rank_embedding, num_hidden=128)
+
+        concat_roi_feat_embedding = mx.sym.FullyConnected(
+            name='roi_feat_embedding',
+            data=concat_fc_all_2_relu,
+            num_hidden=128)
+
+        # sorted_roi_feat, [first_n, num_fg_classes, 128]
+        roi_feat_embedding, ref_roi_feat_embedding = mx.sym.split(concat_roi_feat_embedding, axis=0, num_outputs=2)
+        sorted_roi_feat = mx.sym.take(a=roi_feat_embedding, indices=first_rank_indices)
+        ref_sorted_roi_feat = mx.sym.take(a=ref_roi_feat_embedding, indices=ref_first_rank_indices)
+        concat_sorted_roi_feat = mx.sym.concat(sorted_roi_feat, ref_sorted_roi_feat, dim=0)
+
+        # nms_embedding_feat, [first_n, num_fg_classes, 128]
+        concat_nms_embedding_feat = mx.sym.broadcast_add(
+            lhs=concat_sorted_roi_feat,
+            rhs=mx.sym.expand_dims(concat_nms_rank_feat, axis=1))
 
         concat_nms_position_matrix = NMS_UTILS.extract_multi_position_matrix(concat_sorted_bbox)
 

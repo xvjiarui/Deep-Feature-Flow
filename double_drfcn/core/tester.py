@@ -359,7 +359,7 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
 
                         if cfg.TEST.LEARN_NMS:
                             for target_box in target_boxes:
-                                print("cur", target_box)
+                                print("cur", target_box*scales[delta])
                                 target_cls = int(target_box[0, 4])+1
                                 target_box[0, 4] = 2
                                 boxes_this_image[target_cls] = np.vstack((boxes_this_image[target_cls], target_box))
@@ -428,7 +428,7 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
 
                         if cfg.TEST.LEARN_NMS:
                             for target_box in target_boxes:
-                                print("ref", target_box)
+                                print("ref", target_box*scales[delta])
                                 target_cls = int(target_box[0, 4]) + 1
                                 target_box[0, 4] = 2
                                 ref_boxes_this_image[target_cls] = np.vstack((ref_boxes_this_image[target_cls], target_box))
@@ -564,7 +564,7 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
             for det in dets:
                 bbox = det[:4] * scale
                 score = det[-1]
-                if score < 1.1:
+                if score < threshold:
                     continue
                 linewidth = 0.5 
                 if score == 1:

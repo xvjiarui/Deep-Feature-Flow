@@ -118,8 +118,8 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                 valid_gt_box = gt_box[0, valid_gt_mask, :]
                 num_valid_gt = len(valid_gt_box)
 
-                valid_gt_bef_mask = (gt_box[0, :, -1].astype(np.int32)==(cls_idx+1))
-                valid_gt_bef_box = gt_box[0, valid_gt_mask, :]
+                valid_gt_bef_mask = (gt_box_bef[0, :, -1].astype(np.int32)==(cls_idx+1))
+                valid_gt_bef_box = gt_box_bef[0, valid_gt_bef_mask, :]
                 num_valid_gt_bef = len(valid_gt_bef_box)
                 # assert len(valid_gt_bef_box) == num_valid_gt, "will gt disappear"
 
@@ -166,14 +166,16 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             continue
                         dist_mat = translation_dist(bbox_per_class[valid_bbox_indices], valid_gt_box[:, :-1])
                         dist_bef_mat = translation_dist(bbox_bef_per_class[valid_bbox_bef_indices], valid_gt_bef_box[:, :-1])
-                        # pdb.set_trace()
                         for x in range(num_valid_gt):
                             dist_mat_shape = (bbox_per_class[valid_bbox_indices].shape[0], 
                                 bbox_bef_per_class[valid_bbox_bef_indices].shape[0], 4)
-                            bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat[:, x, :], 1), (1, dist_mat_shape[1],1)) - 
+                            bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat[:, x, :], 1), (1, dist_mat_shape[1], 1)) - 
                                 np.tile(np.expand_dims(dist_bef_mat[:, x, :], 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
                             assert bbox_dist_mat.shape == (len(bbox_per_class[valid_bbox_indices]), len(bbox_bef_per_class[valid_bbox_bef_indices]))
                             ind, ind_bef = np.unravel_index(np.argmin(bbox_dist_mat), bbox_dist_mat.shape)
+                            # print('cur', ind, valid_bbox_indices[ind])
+                            # print('ref', ind_bef, valid_bbox_indices[ind_bef])
+                            # pdb.set_trace()
                             output[valid_bbox_indices[ind]] = 1
                             output_bef[valid_bbox_bef_indices[ind_bef]] = 1
                         output_list_per_class.append(output)
@@ -184,7 +186,7 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                     output_bef_list.append(output_bef_per_class)
             # [num_boxes, num_fg_classes, num_thresh]
             blob = np.stack(output_list, axis=1).astype(np.float32, copy=False)
-            blob_bef = np.stack(output_list, axis=1).astype(np.float32, copy=False)
+            blob_bef = np.stack(output_bef_list, axis=1).astype(np.float32, copy=False)
             return blob, blob_bef
 
         blob, blob_bef = get_target(bbox, gt_box, score, bbox_bef, gt_box_bef, score_bef)
