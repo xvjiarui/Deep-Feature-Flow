@@ -206,7 +206,7 @@ def get_double_image(roidb, config, is_train=True):
         #     # print('cur', image_path)
         #     im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         im = imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
-        print('cur', image_path)
+        # print('cur', image_path)
         # update annotation
         annotation = image_path.replace("Data", "Annotations").replace("JPEG","xml")
         assert os.path.exists(annotation), '{} does not exist'.format(annotation)
@@ -237,7 +237,7 @@ def get_double_image(roidb, config, is_train=True):
                 print "empty gt {}".format(num_empty_gt)
 
             ref_im = imread(ref_image, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
-            print('ref', ref_image)
+            # print('ref', ref_image)
         else:
             ref_im = im.copy()
             ref_roi_rec = roi_rec.copy()
