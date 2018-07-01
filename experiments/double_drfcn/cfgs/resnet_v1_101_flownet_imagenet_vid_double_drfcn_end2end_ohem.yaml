@@ -65,7 +65,7 @@ TRAIN:
   lr_step: '1.333'
   warmup: false
   begin_epoch: 0
-  end_epoch: 5
+  end_epoch: 8
   model_prefix: 'double_drfcn_vid_baseline'
   # whether resume training
   RESUME: false

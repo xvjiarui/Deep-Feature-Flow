@@ -1872,7 +1872,7 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
         return sorted_bbox, sorted_score, nms_rank_embedding, first_rank_indices
 
 
-    def get_train_symbol(self, cfg):
+    def get_train_symbol_(self, cfg):
 
         num_anchors = cfg.network.NUM_ANCHORS
         is_train = True
@@ -2326,7 +2326,7 @@ class resnet_v1_101_flownet_double_drfcn(Symbol):
         return self.sym
 
     # train base
-    def get_train_symbol_(self, cfg):
+    def get_train_symbol(self, cfg):
 
         num_anchors = cfg.network.NUM_ANCHORS
         is_train = True
