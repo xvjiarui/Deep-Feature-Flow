@@ -93,3 +93,4 @@ model
 .db
 
 .tf_logs
+data/cache

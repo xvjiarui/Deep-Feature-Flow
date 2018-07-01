@@ -1,1 +1,2 @@
 import resnet_v1_101_flownet_double_drfcn
+import resnet_v1_101_flownet_double_drfcn_learn_nms

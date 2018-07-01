@@ -161,18 +161,17 @@ def im_detect(predictor, data_batch, data_names, label_names, scales, cfg):
 
             nms_multi_target = output['custom0_nms_multi_target'].asnumpy()
             target, ref_target = np.split(nms_multi_target, 2)
-            non_ref_target_num = np.sum(np.where(target)[0] < 100)
             concat_target_boxes = concat_pred_boxes[np.where(nms_multi_target)[:2]]
 
             # concat_target_boxes = concat_target_boxes / scale
 
-            # construct gt style nms_multi_target, 0:30
+            # construct gt style nms_multi_target, 0:30 classes
             concat_target_boxes = np.hstack((concat_target_boxes, np.where(nms_multi_target)[1][:, np.newaxis]))
 
             target_boxes, ref_target_boxes = np.split(concat_target_boxes, 2)
 
-            label_dict['nms_multi_target'] = target_boxes[:, np.newaxis, :]
-            label_dict['ref_nms_multi_target'] = ref_target_boxes[:, np.newaxis, :]
+            label_dict['nms_multi_target'] = target_boxes[np.newaxis, :, :]
+            label_dict['ref_nms_multi_target'] = ref_target_boxes[np.newaxis, :, :]
 
         else:
             rois, ref_rois = np.split(concat_rois, 2)
@@ -348,20 +347,20 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
                 boxes_this_image = [[]] + [all_boxes[j][idx+delta] for j in range(1, imdb.num_classes)]
                 if show_gt:
                     for label in label_dict_all:
-                        gt_boxes = label['gt_boxes']
-                        target_boxes = label['nms_multi_target']
+                        gt_boxes = label['gt_boxes'][0]
+                        target_boxes = label['nms_multi_target'][0]
                         for gt_box in gt_boxes:
                             gt_box = gt_box.asnumpy()
-                            gt_cls = int(gt_box[0, 4])
+                            gt_cls = int(gt_box[4])
                             gt_box = gt_box/scales[delta]
-                            gt_box[0, 4] = 1
+                            gt_box[4] = 1
                             boxes_this_image[gt_cls] = np.vstack((boxes_this_image[gt_cls], gt_box))
 
                         if cfg.TEST.LEARN_NMS:
                             for target_box in target_boxes:
                                 print("cur", target_box*scales[delta])
-                                target_cls = int(target_box[0, 4])+1
-                                target_box[0, 4] = 2
+                                target_cls = int(target_box[4])+1
+                                target_box[4] = 2
                                 boxes_this_image[target_cls] = np.vstack((boxes_this_image[target_cls], target_box))
                 # vis_all_detection(data_dict['ref_data'].asnumpy(), boxes_this_image, imdb.classes, scales[delta], cfg)
                 # vis_double_all_detection(data_dict['data'].asnumpy(), boxes_this_image, data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
@@ -417,20 +416,20 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
                 ref_boxes_this_image = [[]] + [ref_all_boxes[j][idx+delta] for j in range(1, imdb.num_classes)]
                 if show_gt:
                     for label in label_dict_all:
-                        gt_boxes = label['ref_gt_boxes']
-                        target_boxes = label['ref_nms_multi_target']
+                        gt_boxes = label['ref_gt_boxes'][0]
+                        target_boxes = label['ref_nms_multi_target'][0]
                         for gt_box in gt_boxes:
                             gt_box = gt_box.asnumpy()
-                            gt_cls = int(gt_box[0, 4])
+                            gt_cls = int(gt_box[4])
                             gt_box = gt_box/scales[delta]
-                            gt_box[0, 4] = 1
+                            gt_box[4] = 1
                             ref_boxes_this_image[gt_cls] = np.vstack((ref_boxes_this_image[gt_cls], gt_box))
 
                         if cfg.TEST.LEARN_NMS:
                             for target_box in target_boxes:
                                 print("ref", target_box*scales[delta])
-                                target_cls = int(target_box[0, 4]) + 1
-                                target_box[0, 4] = 2
+                                target_cls = int(target_box[4]) + 1
+                                target_box[4] = 2
                                 ref_boxes_this_image[target_cls] = np.vstack((ref_boxes_this_image[target_cls], target_box))
                 vis_double_all_detection(data_dict['data'].asnumpy(), boxes_this_image, data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
                 # vis_all_detection(data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
@@ -529,18 +528,23 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
         for j, name in enumerate(class_names):
             if name == '__background__':
                 continue
-            color = (random.random(), random.random(), random.random())  # generate a random color
+            origin_color = (random.random(), random.random(), random.random())  # generate a random color
+            target_color = (random.random(), random.random(), random.random())  # generate a random color
             dets = detections[j]
             for det in dets:
                 bbox = det[:4] * scale
                 score = det[-1]
-                if score < threshold or score==1 or score == 2:
+                if score < threshold or score==1:
                     continue
                 linewidth = 0.5 
                 # if score == 1:
                 #     linewidth = 3.5
                 # elif score == 2:
                 #     linewidth = 1.5
+                color = origin_color
+                if score == 2:
+                    color = target_color
+                    linewidth = 2.5
                 rect = plt.Rectangle((bbox[0], bbox[1]),
                                      bbox[2] - bbox[0],
                                      bbox[3] - bbox[1], fill=False,
@@ -559,18 +563,21 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
         for j, name in enumerate(class_names):
             if name == '__background__':
                 continue
-            color = (random.random(), random.random(), random.random())  # generate a random color
+            origin_color = (random.random(), random.random(), random.random())  # generate a random color
+            target_color = (random.random(), random.random(), random.random())
             dets = detections[j]
             for det in dets:
                 bbox = det[:4] * scale
                 score = det[-1]
-                if score < threshold:
+                if score < 1:
                     continue
                 linewidth = 0.5 
                 if score == 1:
                     linewidth = 3.5
+                    color = origin_color
                 elif score == 2:
                     linewidth = 1.5
+                    color = target_color
                 rect = plt.Rectangle((bbox[0], bbox[1]),
                                      bbox[2] - bbox[0],
                                      bbox[3] - bbox[1], fill=False,

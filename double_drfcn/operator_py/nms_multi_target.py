@@ -161,24 +161,27 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                         overlap_score_bef = score_bef_list_per_class[i]
                         output = np.zeros((overlap_score.shape[0],))
                         output_bef = np.zeros((overlap_score_bef.shape[0],))
-                        valid_bbox_indices = np.where(overlap_score)[0]
-                        valid_bbox_bef_indices = np.where(overlap_score_bef)[0]
                         if np.count_nonzero(overlap_score) == 0 or np.count_nonzero(overlap_score_bef) == 0:
                             output_list_per_class.append(output)
                             output_bef_list_per_class.append(output_bef)
                             continue
-                        dist_mat = translation_dist(bbox_per_class[valid_bbox_indices], valid_gt_box[:, :-1])
-                        dist_bef_mat = translation_dist(bbox_bef_per_class[valid_bbox_bef_indices], valid_gt_bef_box[:, :-1])
                         for x in range(num_valid_gt):
+                            overlap_score_per_gt = overlap_score[:, x]
+                            overlap_score_bef_per_gt = overlap_score_bef[:, x]
+                            valid_bbox_indices = np.where(overlap_score_per_gt)[0]
+                            valid_bbox_bef_indices = np.where(overlap_score_bef_per_gt)[0]
+                            target_gt_box = valid_gt_box[x:x+1, :-1]
+                            target_gt_bef_box = valid_gt_bef_box[x:x+1, :-1]
+                            if len(valid_bbox_indices) == 0 or len(valid_bbox_bef_indices) == 0:
+                                continue
+                            dist_mat = translation_dist(bbox_per_class[valid_bbox_indices], target_gt_box)[:, 0, :]
+                            dist_bef_mat = translation_dist(bbox_bef_per_class[valid_bbox_bef_indices], target_gt_bef_box)[:, 0, :]
                             dist_mat_shape = (bbox_per_class[valid_bbox_indices].shape[0], 
                                 bbox_bef_per_class[valid_bbox_bef_indices].shape[0], 4)
-                            bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat[:, x, :], 1), (1, dist_mat_shape[1], 1)) - 
-                                np.tile(np.expand_dims(dist_bef_mat[:, x, :], 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
+                            bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat, 1), (1, dist_mat_shape[1], 1)) - 
+                                np.tile(np.expand_dims(dist_bef_mat, 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
                             assert bbox_dist_mat.shape == (len(bbox_per_class[valid_bbox_indices]), len(bbox_bef_per_class[valid_bbox_bef_indices]))
                             ind, ind_bef = np.unravel_index(np.argmin(bbox_dist_mat), bbox_dist_mat.shape)
-                            # print('cur', ind, valid_bbox_indices[ind])
-                            # print('ref', ind_bef, valid_bbox_indices[ind_bef])
-                            # pdb.set_trace()
                             output[valid_bbox_indices[ind]] = 1
                             output_bef[valid_bbox_bef_indices[ind_bef]] = 1
                         output_list_per_class.append(output)
