@@ -126,20 +126,23 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                 if num_valid_gt != num_valid_gt_bef:
                     if num_valid_gt_bef > num_valid_gt:
                         num_rm = num_valid_gt_bef - num_valid_gt
+                        num_valid_gt_bef = num_valid_gt
                         gt_overlap_mat = bbox_overlaps(valid_gt_bef_box.astype(np.float), 
                             valid_gt_box.astype(np.float))
                         rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
-                        np.delete(valid_gt_bef_box, rm_indices, axis=0)
-                        assert valid_gt_bef_box.shape == valid_gt_box.shape, "failed remove, {} -> {}".format(valid_gt_bef_box.shape[0], valid_gt_box.shape[0])
+                        valid_gt_bef_box = np.delete(valid_gt_bef_box, rm_indices, axis=0)
+                        assert valid_gt_bef_box.shape == valid_gt_box.shape, "failed remove bef, {} -> {}".format(valid_gt_bef_box.shape[0], valid_gt_box.shape[0])
                         print "success remove bef"
                     else:
                         num_rm = num_valid_gt - num_valid_gt_bef
+                        num_valid_gt = num_valid_gt_bef
                         gt_overlap_mat = bbox_overlaps(valid_gt_box.astype(np.float), 
                             valid_gt_bef_box.astype(np.float))
                         rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
-                        np.delete(valid_gt_box, rm_indices, axis=0)
+                        valid_gt_box = np.delete(valid_gt_box, rm_indices, axis=0)
                         assert valid_gt_bef_box.shape == valid_gt_box.shape, "failed remove, {} -> {}".format(valid_gt_bef_box.shape[0], valid_gt_box.shape[0])
                         print "success remove"
+                assert num_valid_gt == num_valid_gt_bef, "gt num are not the same"
                 score_list_per_class = score_list[cls_idx]
                 score_bef_list_per_class = score_bef_list[cls_idx]
 
