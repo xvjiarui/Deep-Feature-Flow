@@ -31,9 +31,9 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
         # score, [first_n, num_fg_classes]
         score = in_data[2].asnumpy()
 
-        bbox_bef = in_data[3].asnumpy()
-        gt_box_bef = in_data[4].asnumpy()
-        score_bef = in_data[5].asnumpy()
+        ref_bbox = in_data[3].asnumpy()
+        ref_gt_box = in_data[4].asnumpy()
+        ref_score = in_data[5].asnumpy()
 
         num_fg_classes = bbox.shape[1]
         batch_image, num_gt, code_size = gt_box.shape
@@ -42,8 +42,7 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
         assert code_size == 5, 'code_size of gt should be 5, but receive %d' % code_size
         assert len(score.shape) == 2, 'shape of score is %d instead of 2.' % len(score.shape)
         assert score.shape[1] == num_fg_classes, 'number of fg classes should be same for boxes and scores'
-        assert bbox.shape[1] == bbox_bef.shape[1], 'num_fg_calsses should be same among frames'
-        # assert gt_box.shape[1] == gt_box_bef.shape[1], 'will gt disappear? {} {}'.format(gt_box.shape[1], gt_box_bef.shape[1])
+        assert bbox.shape[1] == ref_bbox.shape[1], 'num_fg_calsses should be same among frames'
 
         def get_max_socre_bboxes(score_list_per_class, num_boxes):
             if len(score_list_per_class) == 0:
@@ -103,100 +102,99 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
 
             return output_list
 
-        def get_target(bbox, gt_box, score, bbox_bef, gt_box_bef, score_bef):
+        def get_target(bbox, gt_box, score, ref_bbox, ref_gt_box, ref_score):
 
             num_boxes = bbox.shape[0]
-            num_boxes_bef = bbox_bef.shape[0]
+            ref_num_boxes = ref_bbox.shape[0]
             score_list = get_scores(bbox, gt_box, score)
-            score_bef_list = get_scores(bbox_bef, gt_box_bef, score_bef)
+            ref_score_list = get_scores(ref_bbox, ref_gt_box, ref_score)
 
             output_list = []
-            output_bef_list = []
+            ref_output_list = []
             for cls_idx in range(0, num_fg_classes):
 
                 valid_gt_mask = (gt_box[0, :, -1].astype(np.int32)==(cls_idx+1))
                 valid_gt_box = gt_box[0, valid_gt_mask, :]
                 num_valid_gt = len(valid_gt_box)
 
-                valid_gt_bef_mask = (gt_box_bef[0, :, -1].astype(np.int32)==(cls_idx+1))
-                valid_gt_bef_box = gt_box_bef[0, valid_gt_bef_mask, :]
-                num_valid_gt_bef = len(valid_gt_bef_box)
-                # assert len(valid_gt_bef_box) == num_valid_gt, "will gt disappear"
+                ref_valid_gt_mask = (ref_gt_box[0, :, -1].astype(np.int32)==(cls_idx+1))
+                ref_valid_gt_box = ref_gt_box[0, ref_valid_gt_mask, :]
+                ref_num_valid_gt = len(ref_valid_gt_box)
 
-                if num_valid_gt != num_valid_gt_bef:
-                    if num_valid_gt_bef > num_valid_gt:
-                        num_rm = num_valid_gt_bef - num_valid_gt
-                        num_valid_gt_bef = num_valid_gt
-                        gt_overlap_mat = bbox_overlaps(valid_gt_bef_box.astype(np.float), 
+                if num_valid_gt != ref_num_valid_gt:
+                    if ref_num_valid_gt > num_valid_gt:
+                        num_rm = ref_num_valid_gt - num_valid_gt
+                        ref_num_valid_gt = num_valid_gt
+                        gt_overlap_mat = bbox_overlaps(ref_valid_gt_box.astype(np.float), 
                             valid_gt_box.astype(np.float))
                         rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
-                        valid_gt_bef_box = np.delete(valid_gt_bef_box, rm_indices, axis=0)
-                        assert valid_gt_bef_box.shape == valid_gt_box.shape, "failed remove bef, {} -> {}".format(valid_gt_bef_box.shape[0], valid_gt_box.shape[0])
-                        print "success remove bef"
+                        ref_valid_gt_box = np.delete(ref_valid_gt_box, rm_indices, axis=0)
+                        assert ref_valid_gt_box.shape == valid_gt_box.shape, "failed remove ref, {} -> {}".format(ref_valid_gt_box.shape[0], valid_gt_box.shape[0])
+                        print "success remove ref"
                     else:
-                        num_rm = num_valid_gt - num_valid_gt_bef
-                        num_valid_gt = num_valid_gt_bef
+                        num_rm = num_valid_gt - ref_num_valid_gt
+                        num_valid_gt = ref_num_valid_gt
                         gt_overlap_mat = bbox_overlaps(valid_gt_box.astype(np.float), 
-                            valid_gt_bef_box.astype(np.float))
+                            ref_valid_gt_box.astype(np.float))
                         rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
                         valid_gt_box = np.delete(valid_gt_box, rm_indices, axis=0)
-                        assert valid_gt_bef_box.shape == valid_gt_box.shape, "failed remove, {} -> {}".format(valid_gt_bef_box.shape[0], valid_gt_box.shape[0])
+                        assert ref_valid_gt_box.shape == valid_gt_box.shape, "failed remove, {} -> {}".format(ref_valid_gt_box.shape[0], valid_gt_box.shape[0])
                         print "success remove"
-                assert num_valid_gt == num_valid_gt_bef, "gt num are not the same"
+                assert num_valid_gt == ref_num_valid_gt, "gt num are not the same"
                 score_list_per_class = score_list[cls_idx]
-                score_bef_list_per_class = score_bef_list[cls_idx]
+                ref_score_list_per_class = ref_score_list[cls_idx]
 
                 bbox_per_class = bbox[:, cls_idx, :]
-                bbox_bef_per_class = bbox_bef[:, cls_idx, :]
+                ref_bbox_per_class = ref_bbox[:, cls_idx, :]
 
-                if len(score_list_per_class) == 0 or len(score_bef_list_per_class) == 0:
+                if len(score_list_per_class) == 0 or len(ref_score_list_per_class) == 0:
                     output_list.append(get_max_socre_bboxes(score_list_per_class, num_boxes))
-                    output_bef_list.append(get_max_socre_bboxes(score_bef_list_per_class, num_boxes_bef))
+                    ref_output_list.append(get_max_socre_bboxes(ref_score_list_per_class, ref_num_boxes))
                 else:
                     output_list_per_class = []
-                    output_bef_list_per_class = []
+                    ref_output_list_per_class = []
 
                     for i in range(len(self._target_thresh)):
                         overlap_score = score_list_per_class[i]
-                        overlap_score_bef = score_bef_list_per_class[i]
+                        ref_overlap_score = ref_score_list_per_class[i]
                         output = np.zeros((overlap_score.shape[0],))
-                        output_bef = np.zeros((overlap_score_bef.shape[0],))
-                        if np.count_nonzero(overlap_score) == 0 or np.count_nonzero(overlap_score_bef) == 0:
+                        ref_output = np.zeros((ref_overlap_score.shape[0],))
+                        if np.count_nonzero(overlap_score) == 0 or np.count_nonzero(ref_overlap_score) == 0:
                             output_list_per_class.append(output)
-                            output_bef_list_per_class.append(output_bef)
+                            ref_output_list_per_class.append(ref_output)
                             continue
                         for x in range(num_valid_gt):
                             overlap_score_per_gt = overlap_score[:, x]
-                            overlap_score_bef_per_gt = overlap_score_bef[:, x]
+                            ref_overlap_score_per_gt = ref_overlap_score[:, x]
                             valid_bbox_indices = np.where(overlap_score_per_gt)[0]
-                            valid_bbox_bef_indices = np.where(overlap_score_bef_per_gt)[0]
+                            ref_valid_bbox_indices = np.where(ref_overlap_score_per_gt)[0]
                             target_gt_box = valid_gt_box[x:x+1, :-1]
-                            target_gt_bef_box = valid_gt_bef_box[x:x+1, :-1]
-                            if len(valid_bbox_indices) == 0 or len(valid_bbox_bef_indices) == 0:
+                            ref_target_gt_box = ref_valid_gt_box[x:x+1, :-1]
+                            if len(valid_bbox_indices) == 0 or len(ref_valid_bbox_indices) == 0:
                                 continue
                             dist_mat = translation_dist(bbox_per_class[valid_bbox_indices], target_gt_box)[:, 0, :]
-                            dist_bef_mat = translation_dist(bbox_bef_per_class[valid_bbox_bef_indices], target_gt_bef_box)[:, 0, :]
+                            ref_dist_mat = translation_dist(ref_bbox_per_class[ref_valid_bbox_indices], ref_target_gt_box)[:, 0, :]
                             dist_mat_shape = (bbox_per_class[valid_bbox_indices].shape[0], 
-                                bbox_bef_per_class[valid_bbox_bef_indices].shape[0], 4)
+                                ref_bbox_per_class[ref_valid_bbox_indices].shape[0], 4)
                             bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat, 1), (1, dist_mat_shape[1], 1)) - 
-                                np.tile(np.expand_dims(dist_bef_mat, 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
-                            assert bbox_dist_mat.shape == (len(bbox_per_class[valid_bbox_indices]), len(bbox_bef_per_class[valid_bbox_bef_indices]))
-                            ind, ind_bef = np.unravel_index(np.argmin(bbox_dist_mat), bbox_dist_mat.shape)
+                                np.tile(np.expand_dims(ref_dist_mat, 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
+                            assert bbox_dist_mat.shape == (len(bbox_per_class[valid_bbox_indices]), len(ref_bbox_per_class[ref_valid_bbox_indices]))
+                            ind, ref_ind = np.unravel_index(np.argmin(bbox_dist_mat), bbox_dist_mat.shape)
                             output[valid_bbox_indices[ind]] = 1
-                            output_bef[valid_bbox_bef_indices[ind_bef]] = 1
+                            ref_output[ref_valid_bbox_indices[ref_ind]] = 1
                         output_list_per_class.append(output)
-                        output_bef_list_per_class.append(output_bef)
+                        ref_output_list_per_class.append(ref_output)
                     output_per_class = np.stack(output_list_per_class, axis=-1)
-                    output_bef_per_class = np.stack(output_bef_list_per_class, axis=-1)
+                    ref_output_per_class = np.stack(ref_output_list_per_class, axis=-1)
                     output_list.append(output_per_class)
-                    output_bef_list.append(output_bef_per_class)
+                    ref_output_list.append(ref_output_per_class)
             # [num_boxes, num_fg_classes, num_thresh]
             blob = np.stack(output_list, axis=1).astype(np.float32, copy=False)
-            blob_bef = np.stack(output_bef_list, axis=1).astype(np.float32, copy=False)
-            return blob, blob_bef
+            ref_blob = np.stack(ref_output_list, axis=1).astype(np.float32, copy=False)
+            return blob, ref_blob
 
-        blob, blob_bef = get_target(bbox, gt_box, score, bbox_bef, gt_box_bef, score_bef)
-        blob = np.concatenate((blob, blob_bef))
+        blob, ref_blob = get_target(bbox, gt_box, score, ref_bbox, ref_gt_box, ref_score)
+        blob = np.concatenate((blob, ref_blob))
         self.assign(out_data[0], req[0], blob)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -216,7 +214,7 @@ class NmsMultiTargetProp(mx.operator.CustomOpProp):
         self._num_thresh = len(self._target_thresh)
 
     def list_arguments(self):
-        return ['bbox', 'gt_bbox', 'score', 'bbox_bef', 'gt_bbox_bef', 'score_bef']
+        return ['bbox', 'gt_bbox', 'score', 'ref_bbox', 'ref_gt_bbox', 'ref_score']
 
     def list_outputs(self):
         return ['nms_multi_target']
@@ -226,24 +224,23 @@ class NmsMultiTargetProp(mx.operator.CustomOpProp):
         gt_box_shape = in_shape[1]
         score_shape = in_shape[2]
 
-        bbox_bef_shape = in_shape[3]
-        gt_box_bef_shape = in_shape[4]
-        score_bef_shape = in_shape[5]
+        ref_bbox_shape = in_shape[3]
+        ref_gt_box_shape = in_shape[4]
+        ref_score_shape = in_shape[5]
 
         assert bbox_shape[0] == score_shape[0], 'ROI number should be same for bbox and score'
-        assert bbox_bef_shape[0] == score_bef_shape[0], 'ROI number should be same for bbox and score'
+        assert ref_bbox_shape[0] == ref_score_shape[0], 'ROI number should be same for bbox and score'
 
-        # assert gt_box_shape == gt_box_bef_shape, 'GT is not consistent!!!'
 
         num_boxes = bbox_shape[0]
         num_fg_classes = bbox_shape[1]
         output_shape = (num_boxes, num_fg_classes, self._num_thresh)
 
-        num_boxes_bef = bbox_bef_shape[0]
-        num_fg_classes = bbox_bef_shape[1]
-        output_bef_shape = (num_boxes_bef, num_fg_classes, self._num_thresh)
+        ref_num_boxes = ref_bbox_shape[0]
+        num_fg_classes = ref_bbox_shape[1]
+        ref_output_shape = (ref_num_boxes, num_fg_classes, self._num_thresh)
 
-        output_shape = (num_boxes+num_boxes_bef, num_fg_classes, self._num_thresh)
+        output_shape = (num_boxes+ref_num_boxes, num_fg_classes, self._num_thresh)
 
         return in_shape, [output_shape]
 

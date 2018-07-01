@@ -537,8 +537,8 @@ class resnet_v1_101_flownet_double_drfcn_learn_nms(resnet_v1_101_flownet_double_
 
         nms_multi_target = mx.sym.Custom(bbox=sorted_bbox, gt_bbox=gt_boxes, 
                                          score=sorted_score,
-                                         bbox_bef=ref_sorted_bbox, gt_bbox_bef = ref_gt_boxes, 
-                                         score_bef = ref_sorted_score,
+                                         ref_bbox=ref_sorted_bbox, ref_gt_bbox = ref_gt_boxes, 
+                                         ref_score = ref_sorted_score,
                                          op_type='nms_multi_target', target_thresh=nms_target_thresh)
         nms_pos_loss = - mx.sym.broadcast_mul(lhs=nms_multi_target,
                                               rhs=mx.sym.log(data=(concat_nms_multi_score + nms_eps)))
@@ -734,8 +734,8 @@ class resnet_v1_101_flownet_double_drfcn_learn_nms(resnet_v1_101_flownet_double_
 
         nms_multi_target = mx.sym.Custom(bbox=sorted_bbox, gt_bbox=gt_boxes, 
                                          score=sorted_score,
-                                         bbox_bef=ref_sorted_bbox, gt_bbox_bef = ref_gt_boxes, 
-                                         score_bef = ref_sorted_score,
+                                         ref_bbox=ref_sorted_bbox, ref_gt_bbox = ref_gt_boxes, 
+                                         ref_score = ref_sorted_score,
                                          op_type='nms_multi_target', target_thresh=nms_target_thresh)
 
         if cfg.TEST.MERGE_METHOD == -1:
