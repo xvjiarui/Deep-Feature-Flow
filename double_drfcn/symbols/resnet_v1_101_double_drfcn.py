@@ -20,7 +20,7 @@ from resnet_v1_101_rcnn_learn_nms_base import resnet_v1_101_rcnn_learn_nms_base 
 
 
 
-class resnet_v1_101_flownet_double_drfcn(Symbol):
+class resnet_v1_101_double_drfcn(Symbol):
     def __init__(self):
         """
         Use __init__ to define parameter network needs

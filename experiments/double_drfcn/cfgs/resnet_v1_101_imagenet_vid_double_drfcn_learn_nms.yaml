@@ -82,7 +82,7 @@ TRAIN:
   warmup: false
   begin_epoch: 0
   end_epoch: 3
-  model_prefix: 'double_drfcn_vid_learn_nms'
+  model_prefix: 'double_drfcn_vid_share_learn_nms'
   # whether resume training
   RESUME: true
   # whether flip image

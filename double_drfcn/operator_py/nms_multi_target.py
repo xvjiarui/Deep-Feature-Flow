@@ -179,7 +179,22 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat, 1), (1, dist_mat_shape[1], 1)) - 
                                 np.tile(np.expand_dims(ref_dist_mat, 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
                             assert bbox_dist_mat.shape == (len(bbox_per_class[valid_bbox_indices]), len(ref_bbox_per_class[ref_valid_bbox_indices]))
-                            ind, ref_ind = np.unravel_index(np.argmin(bbox_dist_mat), bbox_dist_mat.shape)
+                            top_k = 10
+                            # translation_thresh = 1.1*np.min(bbox_dist_mat)
+                            # top_k = np.sum(bbox_dist_mat < translation_thresh)
+                            # print("top_k", top_k)
+                            top_k = max(1, top_k)
+                            top_k = min(top_k, len(bbox_dist_mat.flatten()))
+                            ind_list, ref_ind_list = np.unravel_index(np.argsort(bbox_dist_mat, axis=None)[:top_k], bbox_dist_mat.shape)
+                            score_sum_list = []
+                            for ind, ref_ind in zip(ind_list, ref_ind_list):
+                                score_sum = overlap_score_per_gt[valid_bbox_indices[ind]] + ref_overlap_score_per_gt[ref_valid_bbox_indices[ref_ind]]
+                                score_sum_list.append(score_sum)
+                            max_idx = np.argmax(np.array(score_sum_list))
+                            ind = ind_list[max_idx]
+                            ref_ind = ref_ind_list[max_idx]
+                            # ind, ref_ind = np.unravel_index(np.argmin(bbox_dist_mat), bbox_dist_mat.shape)
+
                             output[valid_bbox_indices[ind]] = 1
                             ref_output[ref_valid_bbox_indices[ref_ind]] = 1
                         output_list_per_class.append(output)

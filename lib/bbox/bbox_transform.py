@@ -181,13 +181,13 @@ def translation_dist(src_boxes, dst_boxes):
     for k in range(k_):
         dst_width = dst_boxes[k, 2] - dst_boxes[k, 0] + 1
         dst_height = dst_boxes[k, 3] - dst_boxes[k, 1] + 1
-        dst_center_x = (dst_boxes[k, 2] + dst_boxes[k, 0]) / 2
-        dst_center_y = (dst_boxes[k, 3] + dst_boxes[k, 1]) / 2
+        dst_center_x = (dst_boxes[k, 2] + dst_boxes[k, 0]) * 0.5
+        dst_center_y = (dst_boxes[k, 3] + dst_boxes[k, 1]) * 0.5
         for n in range(n_):
             src_width = src_boxes[n, 2] - src_boxes[n, 0] + 1
             src_height = src_boxes[n, 3] - src_boxes[n, 1] + 1
-            src_center_x = (src_boxes[n, 2] + src_boxes[n, 0]) / 2
-            src_center_y = (src_boxes[n, 3] + src_boxes[n, 1]) / 2
+            src_center_x = (src_boxes[n, 2] + src_boxes[n, 0]) * 0.5
+            src_center_y = (src_boxes[n, 3] + src_boxes[n, 1]) * 0.5
             # dist_mat[n, k, 0] = (src_center_x - dst_center_x)/dst_width
             # dist_mat[n, k, 1] = (src_center_y - dst_center_y)/dst_height
             # dist_mat[n, k, 2] = np.log(src_width/dst_width)
