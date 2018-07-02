@@ -231,7 +231,7 @@ class resnet_v1_101_double_drfcn_learn_nms(resnet_v1_101_double_drfcn):
         output = mx.sym.transpose(linear_out_reshape, axes=(1, 2, 0))
         return output, aff_softmax
 
-    def get_sorted_bbox_symbol(self, cfg, rois, cls_score, bbox_pred, im_info, suffix=1, is_train=True):
+    def get_sorted_bbox_symbol_(self, cfg, rois, cls_score, bbox_pred, im_info, suffix=1, is_train=True):
 
 
         num_classes = cfg.dataset.NUM_CLASSES
@@ -302,6 +302,78 @@ class resnet_v1_101_double_drfcn_learn_nms(resnet_v1_101_double_drfcn):
         # return sorted_bbox, sorted_score, nms_embedding_feat
 
         return sorted_bbox, sorted_score, first_rank_indices
+
+    def get_sorted_bbox_symbol(self, cfg, rois, cls_score, bbox_pred, im_info, fc_all_2_relu, suffix=1, is_train=True):
+
+
+        num_classes = cfg.dataset.NUM_CLASSES
+        num_reg_classes = (2 if cfg.CLASS_AGNOSTIC else num_classes)
+        nms_target_thresh = np.fromstring(cfg.network.NMS_TARGET_THRESH, dtype=float, sep=',')
+        num_thresh = len(nms_target_thresh)
+        nms_eps = 1e-8
+        first_n = cfg.TRAIN.FIRST_N if is_train else cfg.TEST.FIRST_N
+        num_fg_classes = num_classes - 1
+        bbox_means = cfg.TRAIN.BBOX_MEANS if is_train else None
+        bbox_stds = cfg.TRAIN.BBOX_STDS if is_train else None
+        nongt_dim = cfg.TRAIN.RPN_POST_NMS_TOP_N if is_train else cfg.TEST.RPN_POST_NMS_TOP_N
+
+        # remove gt
+        cls_score_nongt = mx.sym.slice_axis(data=cls_score, axis=0, begin=0, end=nongt_dim)
+        bbox_pred_nongt = mx.sym.slice_axis(data=bbox_pred, axis=0, begin=0, end=nongt_dim)
+        bbox_pred_nongt = mx.sym.BlockGrad(bbox_pred_nongt)
+
+        # refine bbox
+        # remove batch idx and gt roi
+        # sliced_rois, [nongt_dim, 4]
+        sliced_rois = mx.sym.slice(data=rois, begin=(0, 1), end=(nongt_dim, None))
+        # bbox_pred_nobg, [num_rois, 4*(num_reg_classes-1)]
+        bbox_pred_nobg = mx.sym.slice_axis(data=bbox_pred_nongt, axis=1, begin=4, end=None)
+        # [num_boxes, 4, num_reg_classes-1]
+        refined_bbox = NMS_UTILS.refine_bbox(sliced_rois, bbox_pred_nobg, im_info,
+                                        means=bbox_means, stds=bbox_stds
+                                        )
+        # softmax cls_score to cls_prob, [num_rois, num_classes]
+        cls_prob = mx.sym.softmax(data=cls_score_nongt, axis=-1)
+        cls_prob_nobg = mx.sym.slice_axis(cls_prob, axis=1, begin=1, end=None)
+        sorted_cls_prob_nobg = mx.sym.sort(data=cls_prob_nobg, axis=0, is_ascend=False)
+        # sorted_score, [first_n, num_fg_classes]
+        sorted_score = mx.sym.slice_axis(sorted_cls_prob_nobg, axis=0,
+                                         begin=0, end=first_n, name='sorted_score_{}'.format(suffix))
+        # sort by score
+        rank_indices = mx.sym.argsort(data=cls_prob_nobg, axis=0, is_ascend=False)
+        # first_rank_indices, [first_n, num_fg_classes]
+        first_rank_indices = mx.sym.slice_axis(rank_indices, axis=0, begin=0, end=first_n)
+        # sorted_bbox, [first_n, num_fg_classes, 4, num_reg_classes-1]
+        sorted_bbox = mx.sym.take(a=refined_bbox, indices=first_rank_indices)
+        if cfg.CLASS_AGNOSTIC:
+            # sorted_bbox, [first_n, num_fg_classes, 4]
+            sorted_bbox = mx.sym.Reshape(sorted_bbox, shape=(0, 0, 0), name='sorted_bbox_{}'.format(suffix))
+        else:
+            cls_mask = mx.sym.arange(0, num_fg_classes)
+            cls_mask = mx.sym.Reshape(cls_mask, shape=(1, -1, 1))
+            cls_mask = mx.sym.broadcast_to(cls_mask, shape=(first_n, 0, 4))
+            # sorted_bbox, [first_n, num_fg_classes, 4]
+            sorted_bbox = mx.sym.pick(data=sorted_bbox, name='sorted_bbox_{}'.format(suffix),
+                                      index=cls_mask, axis=3)
+
+        nms_rank_embedding = NMS_UTILS.extract_rank_embedding(first_n, 1024)
+
+        # nms_rank_feat, [first_n, 1024]
+        nms_rank_feat = mx.sym.FullyConnected(name='nms_rank_{}'.format(suffix), data=nms_rank_embedding, num_hidden=128)
+
+        roi_feat_embedding = mx.sym.FullyConnected(
+            name='roi_feat_embedding_{}'.format(suffix),
+            data=fc_all_2_relu,
+            num_hidden=128)
+        # sorted_roi_feat, [first_n, num_fg_classes, 128]
+        sorted_roi_feat = mx.sym.take(a=roi_feat_embedding, indices=first_rank_indices)
+
+        # nms_embedding_feat, [first_n, num_fg_classes, 128]
+        nms_embedding_feat = mx.sym.broadcast_add(
+            lhs=sorted_roi_feat,
+            rhs=mx.sym.expand_dims(nms_rank_feat, axis=1))
+
+        return sorted_bbox, sorted_score, nms_embedding_feat
 
     def get_train_symbol(self, cfg):
 
@@ -437,7 +509,7 @@ class resnet_v1_101_double_drfcn_learn_nms(resnet_v1_101_double_drfcn):
         concat_cls_score = mx.sym.FullyConnected(name='cls_score', data=concat_fc_all_2_relu, num_hidden=num_classes)
         concat_bbox_pred = mx.sym.FullyConnected(name='bbox_pred', data=concat_fc_all_2_relu, num_hidden=num_reg_classes * 4)
 
-        # fc_all_2_relu, ref_fc_all_2_relu = mx.sym.split(concat_fc_all_2_relu, axis=0, num_outputs=2)
+        fc_all_2_relu, ref_fc_all_2_relu = mx.sym.split(concat_fc_all_2_relu, axis=0, num_outputs=2)
         cls_score, ref_cls_score = mx.sym.split(concat_cls_score, axis=0, num_outputs=2)
         bbox_pred, ref_bbox_pred = mx.sym.split(concat_bbox_pred, axis=0, num_outputs=2)
 
@@ -473,8 +545,10 @@ class resnet_v1_101_double_drfcn_learn_nms(resnet_v1_101_double_drfcn):
         output_sym_list = [concat_rpn_cls_prob, concat_rpn_bbox_loss, cls_prob, bbox_loss, mx.sym.BlockGrad(rcnn_label)]
 
 
-        sorted_bbox, sorted_score, first_rank_indices = self.get_sorted_bbox_symbol(cfg, rois, cls_score, bbox_pred, im_info, 1)
-        ref_sorted_bbox, ref_sorted_score, ref_first_rank_indices = self.get_sorted_bbox_symbol(cfg, ref_rois, ref_cls_score, ref_bbox_pred, ref_im_info, 2)
+        # sorted_bbox, sorted_score, first_rank_indices = self.get_sorted_bbox_symbol(cfg, rois, cls_score, bbox_pred, im_info, 1)
+        # ref_sorted_bbox, ref_sorted_score, ref_first_rank_indices = self.get_sorted_bbox_symbol(cfg, ref_rois, ref_cls_score, ref_bbox_pred, ref_im_info, 2)
+        sorted_bbox, sorted_score, nms_embedding_feat = self.get_sorted_bbox_symbol(cfg, rois, cls_score, bbox_pred, im_info, fc_all_2_relu, 1)
+        ref_sorted_bbox, ref_sorted_score, ref_nms_embedding_feat = self.get_sorted_bbox_symbol(cfg, ref_rois, ref_cls_score, ref_bbox_pred, ref_im_info, ref_fc_all_2_relu, 2)
 
         # nms_rank_embedding, [first_n, 1024]
         first_n = cfg.TRAIN.FIRST_N
@@ -483,27 +557,29 @@ class resnet_v1_101_double_drfcn_learn_nms(resnet_v1_101_double_drfcn):
 
         concat_sorted_bbox = mx.sym.concat(sorted_bbox, ref_sorted_bbox, dim=0)
         concat_sorted_score = mx.sym.concat(sorted_score, ref_sorted_score, dim=0)
-        concat_nms_rank_embedding = mx.sym.concat(nms_rank_embedding, ref_nms_rank_embedding, dim=0)
+
+        concat_nms_embedding_feat = mx.sym.concat(nms_embedding_feat, ref_nms_embedding_feat, dim=0)
+        # concat_nms_rank_embedding = mx.sym.concat(nms_rank_embedding, ref_nms_rank_embedding, dim=0)
 
 
         # nms_rank_feat, [first_n, 1024]
-        concat_nms_rank_feat = mx.sym.FullyConnected(name='nms_rank', data=concat_nms_rank_embedding, num_hidden=128)
+        # concat_nms_rank_feat = mx.sym.FullyConnected(name='nms_rank', data=concat_nms_rank_embedding, num_hidden=128)
 
-        concat_roi_feat_embedding = mx.sym.FullyConnected(
-            name='roi_feat_embedding',
-            data=concat_fc_all_2_relu,
-            num_hidden=128)
+        # concat_roi_feat_embedding = mx.sym.FullyConnected(
+        #     name='roi_feat_embedding',
+        #     data=concat_fc_all_2_relu,
+        #     num_hidden=128)
 
         # sorted_roi_feat, [first_n, num_fg_classes, 128]
-        roi_feat_embedding, ref_roi_feat_embedding = mx.sym.split(concat_roi_feat_embedding, axis=0, num_outputs=2)
-        sorted_roi_feat = mx.sym.take(a=roi_feat_embedding, indices=first_rank_indices)
-        ref_sorted_roi_feat = mx.sym.take(a=ref_roi_feat_embedding, indices=ref_first_rank_indices)
-        concat_sorted_roi_feat = mx.sym.concat(sorted_roi_feat, ref_sorted_roi_feat, dim=0)
+        # roi_feat_embedding, ref_roi_feat_embedding = mx.sym.split(concat_roi_feat_embedding, axis=0, num_outputs=2)
+        # sorted_roi_feat = mx.sym.take(a=roi_feat_embedding, indices=first_rank_indices)
+        # ref_sorted_roi_feat = mx.sym.take(a=ref_roi_feat_embedding, indices=ref_first_rank_indices)
+        # concat_sorted_roi_feat = mx.sym.concat(sorted_roi_feat, ref_sorted_roi_feat, dim=0)
 
         # nms_embedding_feat, [first_n, num_fg_classes, 128]
-        concat_nms_embedding_feat = mx.sym.broadcast_add(
-            lhs=concat_sorted_roi_feat,
-            rhs=mx.sym.expand_dims(concat_nms_rank_feat, axis=1))
+        # concat_nms_embedding_feat = mx.sym.broadcast_add(
+        #     lhs=concat_sorted_roi_feat,
+        #     rhs=mx.sym.expand_dims(concat_nms_rank_feat, axis=1))
 
         concat_nms_position_matrix = NMS_UTILS.extract_multi_position_matrix(concat_sorted_bbox)
 
@@ -794,14 +870,25 @@ class resnet_v1_101_double_drfcn_learn_nms(resnet_v1_101_double_drfcn):
 
     #     self.init_weight_attention_nms_multi_head(cfg, arg_params, aux_params, index=1)
 
+    def init_weight_embedding(self, cfg, arg_params, aux_params, index=1):
+        arg_params['nms_rank_{}_weight'.format(index)] = mx.random.normal(
+            0, 0.01, shape=self.arg_shape_dict['nms_rank_{}_weight'.format(index)])
+        arg_params['nms_rank_{}_bias'.format(index)] = mx.nd.zeros(shape=self.arg_shape_dict['nms_rank_{}_bias'.format(index)])
+        arg_params['roi_feat_embedding_{}_weight'.format(index)] = mx.random.normal(
+            0, 0.01, shape=self.arg_shape_dict['roi_feat_embedding_{}_weight'.format(index)])
+        arg_params['roi_feat_embedding_{}_bias'.format(index)] = mx.nd.zeros(
+            shape=self.arg_shape_dict['roi_feat_embedding_{}_bias'.format(index)])
+
     def init_weight_nms(self, cfg, arg_params, aux_params):
-        arg_params['nms_rank_weight'] = mx.random.normal(
-            0, 0.01, shape=self.arg_shape_dict['nms_rank_weight'])
-        arg_params['nms_rank_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['nms_rank_bias'])
-        arg_params['roi_feat_embedding_weight'] = mx.random.normal(
-            0, 0.01, shape=self.arg_shape_dict['roi_feat_embedding_weight'])
-        arg_params['roi_feat_embedding_bias'] = mx.nd.zeros(
-            shape=self.arg_shape_dict['roi_feat_embedding_bias'])
+        # arg_params['nms_rank_weight'] = mx.random.normal(
+        #     0, 0.01, shape=self.arg_shape_dict['nms_rank_weight'])
+        # arg_params['nms_rank_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['nms_rank_bias'])
+        # arg_params['roi_feat_embedding_weight'] = mx.random.normal(
+        #     0, 0.01, shape=self.arg_shape_dict['roi_feat_embedding_weight'])
+        # arg_params['roi_feat_embedding_bias'] = mx.nd.zeros(
+        #     shape=self.arg_shape_dict['roi_feat_embedding_bias'])
+        self.init_weight_embedding(cfg, arg_params, aux_params, index=1)
+        self.init_weight_embedding(cfg, arg_params, aux_params, index=2)
         arg_params['nms_logit_weight'] = mx.random.normal(
             0, 0.01, shape=self.arg_shape_dict['nms_logit_weight'])
         arg_params['nms_logit_bias'] = mx.nd.full(shape=self.arg_shape_dict['nms_logit_bias'], val=-3.0)
