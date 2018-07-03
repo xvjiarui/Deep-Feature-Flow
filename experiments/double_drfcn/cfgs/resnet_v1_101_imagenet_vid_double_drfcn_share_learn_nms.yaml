@@ -1,7 +1,7 @@
 ---
 MXNET_VERSION: "mxnet"
 output_path: "./output/double_drfcn/imagenet_vid"
-symbol: resnet_v1_101_double_drfcn_learn_nms
+symbol: resnet_v1_101_double_drfcn_share_learn_nms
 # gpus: '0,1,2,3,4,5,6,7'
 # gpus: '0'
 gpus: '0,1,2,3'
@@ -82,7 +82,7 @@ TRAIN:
   warmup: false
   begin_epoch: 0
   end_epoch: 3
-  model_prefix: 'double_drfcn_vid_learn_nms'
+  model_prefix: 'double_drfcn_vid_share_learn_nms'
   # whether resume training
   RESUME: true
   # whether flip image
