@@ -18,6 +18,8 @@ import pdb
 from bbox.bbox_transform import bbox_overlaps, translation_dist
 
 
+num_of_is_full_max = [0]
+score_rank_max = [0, 0]
 class NmsMultiTargetOp(mx.operator.CustomOp):
     def __init__(self, target_thresh):
         super(NmsMultiTargetOp, self).__init__()
@@ -104,6 +106,7 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
 
         def get_target(bbox, gt_box, score, ref_bbox, ref_gt_box, ref_score):
 
+            global num_of_is_full_max
             num_boxes = bbox.shape[0]
             ref_num_boxes = ref_bbox.shape[0]
             score_list = get_scores(bbox, gt_box, score)
@@ -179,20 +182,35 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat, 1), (1, dist_mat_shape[1], 1)) - 
                                 np.tile(np.expand_dims(ref_dist_mat, 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
                             assert bbox_dist_mat.shape == (len(bbox_per_class[valid_bbox_indices]), len(ref_bbox_per_class[ref_valid_bbox_indices]))
-                            top_k = 10
+                            # top_k = 10
                             # translation_thresh = 1.1*np.min(bbox_dist_mat)
                             # top_k = np.sum(bbox_dist_mat < translation_thresh)
-                            # print("top_k", top_k)
+                            top_k = int(0.1 * len(bbox_dist_mat.flatten()) + 0.5)
                             top_k = max(1, top_k)
                             top_k = min(top_k, len(bbox_dist_mat.flatten()))
+                            # top_k = 1
+                            # print("{} of out {} stable pair".format(top_k, len(bbox_dist_mat.flatten())))
                             ind_list, ref_ind_list = np.unravel_index(np.argsort(bbox_dist_mat, axis=None)[:top_k], bbox_dist_mat.shape)
                             score_sum_list = []
+                            rank_sum_list = []
                             for ind, ref_ind in zip(ind_list, ref_ind_list):
                                 score_sum = overlap_score_per_gt[valid_bbox_indices[ind]] + ref_overlap_score_per_gt[ref_valid_bbox_indices[ref_ind]]
+                                rank_sum = valid_bbox_indices[ind] + ref_valid_bbox_indices[ref_ind]
                                 score_sum_list.append(score_sum)
-                            max_idx = np.argmax(np.array(score_sum_list))
+                                rank_sum_list.append(rank_sum)
+                            score_max_idx = np.argmax(np.array(score_sum_list))
+                            rank_max_idx = np.argmax(np.array(rank_sum_list))
+                            if score_max_idx == rank_max_idx:
+                                score_rank_max[0] += 1
+                            score_rank_max[1] += 1
+                            max_idx = rank_max_idx
+                            # max_idx = score_max_idx
                             ind = ind_list[max_idx]
                             ref_ind = ref_ind_list[max_idx]
+                            if ind == np.argmax(overlap_score_per_gt[valid_bbox_indices]):
+                                num_of_is_full_max[0] += 1
+                            if ref_ind == np.argmax(ref_overlap_score_per_gt[ref_valid_bbox_indices]):
+                                num_of_is_full_max[0] += 1
                             # ind, ref_ind = np.unravel_index(np.argmin(bbox_dist_mat), bbox_dist_mat.shape)
 
                             output[valid_bbox_indices[ind]] = 1
@@ -208,8 +226,10 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
             ref_blob = np.stack(ref_output_list, axis=1).astype(np.float32, copy=False)
             return blob, ref_blob
 
+        num_of_is_full_max[0] = 0
         blob, ref_blob = get_target(bbox, gt_box, score, ref_bbox, ref_gt_box, ref_score)
         blob = np.concatenate((blob, ref_blob))
+        # print("score_rank:{}".format(1.0*score_rank_max[0]/score_rank_max[1]))
         self.assign(out_data[0], req[0], blob)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):

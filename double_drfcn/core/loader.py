@@ -81,12 +81,26 @@ class TestLoader(mx.io.DataIter):
     def iter_next(self):
         return self.cur < self.size
 
+    # def next(self):
+    #     if self.iter_next():
+    #         self.get_batch()
+    #         self.cur += self.batch_size
+    #         self.cur_frameid += 1
+    #         if self.cur_frameid == self.cur_seg_len:
+    #             self.cur_roidb_index += 1
+    #             self.cur_frameid = 0
+    #         return self.im_info, self.ref_im_info, mx.io.DataBatch(data=self.data, label=self.label,
+    #                                pad=self.getpad(), index=self.getindex(),
+    #                                provide_data=self.provide_data, provide_label=self.provide_label)
+    #     else:
+    #         raise StopIteration
+
     def next(self):
         if self.iter_next():
             self.get_batch()
             self.cur += self.batch_size
-            self.cur_frameid += 1
-            if self.cur_frameid == self.cur_seg_len:
+            self.cur_frameid += int(0.05*self.cur_seg_len + 0.5)
+            if self.cur_frameid >= self.cur_seg_len:
                 self.cur_roidb_index += 1
                 self.cur_frameid = 0
             return self.im_info, self.ref_im_info, mx.io.DataBatch(data=self.data, label=self.label,
@@ -110,6 +124,25 @@ class TestLoader(mx.io.DataIter):
         cur_roidb['frame_seg_id'] = self.cur_frameid
         self.cur_seg_len = cur_roidb['frame_seg_len']
         data, label, im_info, ref_im_info = get_rpn_double_testbatch([cur_roidb], self.cfg)
+        empty_gt = False
+        if label[0]['gt_boxes'].shape[0] == 0:
+            empty_gt = True
+            print("empty frame")
+        while empty_gt:
+            self.cur += self.batch_size
+            self.cur_frameid += int(0.05*self.cur_seg_len + 0.5)
+            if self.cur_frameid >= self.cur_seg_len:
+                self.cur_roidb_index += 1
+                self.cur_frameid = 0
+            cur_roidb = self.roidb[self.cur_roidb_index].copy()
+            cur_roidb['image'] = cur_roidb['pattern'] % self.cur_frameid
+            cur_roidb['frame_seg_id'] = self.cur_frameid
+            self.cur_seg_len = cur_roidb['frame_seg_len']
+            data, label, im_info, ref_im_info = get_rpn_double_testbatch([cur_roidb], self.cfg)
+            empty_gt = False
+            if label[0]['gt_boxes'].shape[0] == 0:
+                empty_gt = True
+                print("empty frame")
         self.data = [[mx.nd.array(idata[name]) for name in self.data_name] for idata in data]
         self.label = [[mx.nd.array(ilabel[name][np.newaxis, :, :]) for name in self.label_name] for ilabel in label]
         # self.label = [[mx.nd.array(ilabel[name]) for name in self.label_name] for ilabel in label]

@@ -217,7 +217,7 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, pretrained_flow, epo
 def main():
     print('Called with argument:', args)
     if args.usePhilly:
-        config.gpus = '0,1,2,3,4,5,6,7'
+        config.gpus = '0,1,2,3'
         config.USE_PHILLY = True
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
     print('gpus', ctx)

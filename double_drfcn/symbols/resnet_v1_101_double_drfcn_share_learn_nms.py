@@ -673,11 +673,15 @@ class resnet_v1_101_double_drfcn_share_learn_nms(resnet_v1_101_double_drfcn):
         cls_score, ref_cls_score = mx.sym.split(concat_cls_score, axis=0, num_outputs=2)
         bbox_pred, ref_bbox_pred = mx.sym.split(concat_bbox_pred, axis=0, num_outputs=2)
 
-        sorted_bbox, sorted_score, nms_rank_embedding, first_rank_indices = self.get_sorted_bbox_symbol(cfg, rois, cls_score, bbox_pred, im_info, 1)
-        ref_sorted_bbox, ref_sorted_score, ref_nms_rank_embedding, ref_first_rank_indices = self.get_sorted_bbox_symbol(cfg, ref_rois, ref_cls_score, ref_bbox_pred, ref_im_info, 2)
+        sorted_bbox, sorted_score, first_rank_indices = self.get_sorted_bbox_symbol(cfg, rois, cls_score, bbox_pred, im_info, 1)
+        ref_sorted_bbox, ref_sorted_score, ref_first_rank_indices = self.get_sorted_bbox_symbol(cfg, ref_rois, ref_cls_score, ref_bbox_pred, ref_im_info, 2)
 
         concat_sorted_bbox = mx.sym.concat(sorted_bbox, ref_sorted_bbox, dim=0, name='concat_sorted_bbox')
         concat_sorted_score = mx.sym.concat(sorted_score, ref_sorted_score, dim=0, name='concat_sorted_score')
+
+        first_n = cfg.TEST.FIRST_N
+        nms_rank_embedding = NMS_UTILS.extract_rank_embedding(first_n)
+        ref_nms_rank_embedding = NMS_UTILS.extract_rank_embedding(first_n)
         concat_nms_rank_embedding = mx.sym.concat(nms_rank_embedding, ref_nms_rank_embedding, dim=0)
 
 

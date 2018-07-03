@@ -3,8 +3,8 @@ MXNET_VERSION: "mxnet"
 output_path: "./output/double_drfcn/imagenet_vid"
 symbol: resnet_v1_101_double_drfcn_learn_nms
 # gpus: '0,1,2,3,4,5,6,7'
-# gpus: '0'
-gpus: '0,1,2,3'
+gpus: '7'
+# gpus: '0,1,2,3'
 CLASS_AGNOSTIC: true
 USE_PHILLY: false
 SCALES:
@@ -150,7 +150,8 @@ TRAIN:
   - 0.2
   JOINT_TRAINING: true
   LEARN_NMS: true
-  MIN_OFFSET: -9
+  MAX_OFFSET: -1
+  MIN_OFFSET: -1
 
 TEST:
   # use rpn to generate proposal
@@ -167,5 +168,6 @@ TEST:
   NMS: 0.3
   test_epoch: 2
 
+  SOFT_NMS: false
   LEARN_NMS: true
   MERGE_METHOD: -2
