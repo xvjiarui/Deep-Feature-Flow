@@ -141,17 +141,25 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin
 
     # decide training params
     # metric
-    rpn_eval_metric = metric.RPNAccMetric()
-    rpn_cls_metric = metric.RPNLogLossMetric()
-    rpn_bbox_metric = metric.RPNL1LossMetric()
     eval_metric = metric.RCNNAccMetric(config)
     cls_metric = metric.RCNNLogLossMetric(config)
     bbox_metric = metric.RCNNL1LossMetric(config)
     eval_metrics = mx.metric.CompositeEvalMetric()
-    # rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric, eval_metric, cls_metric, bbox_metric
-    for child_metric in [rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric, eval_metric, cls_metric, bbox_metric]:
-        eval_metrics.add(child_metric)
 
+    for child_metric in [eval_metric, cls_metric, bbox_metric]:
+        eval_metrics.add(child_metric)
+    if config.TRAIN.JOINT_TRAINING or (not config.TRAIN.LEARN_NMS):
+        rpn_eval_metric = metric.RPNAccMetric()
+        rpn_cls_metric = metric.RPNLogLossMetric()
+        rpn_bbox_metric = metric.RPNL1LossMetric()
+        for child_metric in [rpn_eval_metric, rpn_cls_metric, rpn_bbox_metric]:
+            eval_metrics.add(child_metric)
+
+    if config.TRAIN.LEARN_NMS:
+        eval_metrics.add(metric.NMSLossMetric(config, 'pos'))
+        eval_metrics.add(metric.NMSLossMetric(config, 'neg'))
+        eval_metrics.add(metric.NMSAccMetric(config))
+        
     # callback
     batch_end_callback = [callback.Speedometer(train_data.batch_size, frequent=args.frequent)]
 
@@ -192,7 +200,11 @@ def train_net(args, ctx, pretrained_dir, pretrained_resnet, epoch, prefix, begin
 
 def main():
     print('Called with argument:', args)
+    if args.usePhilly:
+        config.gpus = '0,1,2,3,4,5,6,7'
+        config.USE_PHILLY = True
     ctx = [mx.gpu(int(i)) for i in config.gpus.split(',')]
+    print("gpus:", ctx)
     train_net(args, ctx, config.network.pretrained_dir, config.network.pretrained_resnet, config.network.pretrained_epoch, config.TRAIN.model_prefix,
               config.TRAIN.begin_epoch, config.TRAIN.end_epoch, config.TRAIN.lr, config.TRAIN.lr_step)
 

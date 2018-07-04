@@ -150,8 +150,8 @@ TRAIN:
   - 0.2
   JOINT_TRAINING: true
   LEARN_NMS: true
-  MAX_OFFSET: -1
-  MIN_OFFSET: -1
+  # MAX_OFFSET: -1
+  # MIN_OFFSET: -9
 
 TEST:
   # use rpn to generate proposal
