@@ -220,7 +220,7 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             ref_dist_mat = translation_dist(ref_bbox_per_class[ref_valid_bbox_indices], ref_target_gt_box)[:, 0, :]
                             dist_mat_shape = (bbox_per_class[valid_bbox_indices].shape[0], 
                                 ref_bbox_per_class[ref_valid_bbox_indices].shape[0], 4)
-                            print((np.tile(np.expand_dims(dist_mat, 1), (1, dist_mat_shape[1], 1)) - 
+                            # print((np.tile(np.expand_dims(dist_mat, 1), (1, dist_mat_shape[1], 1)) - 
                                 np.tile(np.expand_dims(ref_dist_mat, 0), (dist_mat_shape[0], 1, 1)))**2)
                             bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat, 1), (1, dist_mat_shape[1], 1)) - 
                                 np.tile(np.expand_dims(ref_dist_mat, 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
@@ -232,7 +232,7 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             top_k = max(1, top_k)
                             top_k = min(top_k, len(bbox_dist_mat.flatten()))
                             # top_k = 1
-                            print("{} of out {} stable pair".format(top_k, len(bbox_dist_mat.flatten())))
+                            # print("{} of out {} stable pair".format(top_k, len(bbox_dist_mat.flatten())))
                             ind_list, ref_ind_list = np.unravel_index(np.argsort(bbox_dist_mat, axis=None)[:top_k], bbox_dist_mat.shape)
                             score_sum_list = []
                             rank_sum_list = []
