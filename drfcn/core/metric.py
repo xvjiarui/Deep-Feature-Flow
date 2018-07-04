@@ -4,6 +4,7 @@
 # Copyright (c) 2017 Microsoft
 # Licensed under The Apache-2.0 License [see LICENSE for details]
 # Modified by Yuwen Xiong
+# Modified by Jiarui XU
 # --------------------------------------------------------
 
 import mxnet as mx
@@ -12,7 +13,8 @@ import numpy as np
 
 def get_rpn_names():
     pred = ['rpn_cls_prob', 'rpn_bbox_loss']
-    label = ['rpn_label', 'rpn_bbox_target', 'rpn_bbox_weight']
+    label = ['rpn_label', 'ref_rpn_label', 'rpn_bbox_target', 'ref_rpn_bbox_target', 'rpn_bbox_weight', 'ref_rpn_bbox_weight']
+
     return pred, label
 
 
@@ -36,9 +38,10 @@ class RPNAccMetric(mx.metric.EvalMetric):
     def update(self, labels, preds):
         pred = preds[self.pred.index('rpn_cls_prob')]
         label = labels[self.label.index('rpn_label')]
+        ref_label = labels[self.label.index('ref_rpn_label')]
 
         # pred (b, c, p) or (b, c, h, w)
-        pred_label = mx.ndarray.argmax_channel(pred).asnumpy().astype('int32')
+        pred_label = mx.ndarray.argmax_channel(pred[0:1]).asnumpy().astype('int32')
         pred_label = pred_label.reshape((pred_label.shape[0], -1))
         # label (b, p)
         label = label.asnumpy().astype('int32')
@@ -51,6 +54,19 @@ class RPNAccMetric(mx.metric.EvalMetric):
         self.sum_metric += np.sum(pred_label.flat == label.flat)
         self.num_inst += len(pred_label.flat)
 
+        # pred (b, c, p) or (b, c, h, w)
+        ref_pred_label = mx.ndarray.argmax_channel(pred[1:2]).asnumpy().astype('int32')
+        ref_pred_label = ref_pred_label.reshape((ref_pred_label.shape[0], -1))
+        # label (b, p)
+        ref_label = ref_label.asnumpy().astype('int32')
+
+        # filter with keep_inds
+        keep_inds = np.where(ref_label != -1)
+        ref_pred_label = ref_pred_label[keep_inds]
+        ref_label = ref_label[keep_inds]
+
+        self.sum_metric += np.sum(ref_pred_label.flat == ref_label.flat)
+        self.num_inst += len(ref_pred_label.flat)
 
 class RCNNAccMetric(mx.metric.EvalMetric):
     def __init__(self, cfg):
@@ -87,9 +103,12 @@ class RPNLogLossMetric(mx.metric.EvalMetric):
     def update(self, labels, preds):
         pred = preds[self.pred.index('rpn_cls_prob')]
         label = labels[self.label.index('rpn_label')]
+        ref_label = labels[self.label.index('ref_rpn_label')]
 
         # label (b, p)
         label = label.asnumpy().astype('int32').reshape((-1))
+        ref_label = ref_label.asnumpy().astype('int32').reshape((-1))
+        label = np.concatenate((label, ref_label))
         # pred (b, c, p) or (b, c, h, w) --> (b, p, c) --> (b*p, c)
         pred = pred.asnumpy().reshape((pred.shape[0], pred.shape[1], -1)).transpose((0, 2, 1))
         pred = pred.reshape((label.shape[0], -1))
@@ -174,3 +193,116 @@ class RCNNL1LossMetric(mx.metric.EvalMetric):
 
         self.sum_metric += np.sum(bbox_loss)
         self.num_inst += num_inst
+        
+class NMSLossMetric(mx.metric.EvalMetric):
+    def __init__(self, cfg, name):
+        assert cfg.TRAIN.LEARN_NMS, 'config set learn nms to be false'
+        assert name in ['pos', 'neg'], 'only for nms_pos/neg_loss'
+        super(NMSLossMetric, self).__init__('NMSLoss_' + name)
+        # self._num_fg_classes = cfg.dataset.NUM_CLASSES - 1
+        self._offset = ['pos', 'neg'].index(name)
+
+    def update(self, labels, preds):
+        # for x in preds:
+        #     nms_loss_list.append(x.asnumpy())
+        # if self._debug:
+        #     nms_multi_target = preds[-4].asnumpy()
+        #     if self._offset == 0:
+        #         print self.name, 'pos:', np.sum(nms_multi_target[1:, :, :])
+        #     else:
+        #         print self.name, 'neg:', np.size(nms_multi_target[1:, :, :]) - np.sum(nms_multi_target[1:, :, :])
+
+        nms_loss = preds[-2 + self._offset].asnumpy()
+
+        self.sum_metric += np.sum(nms_loss)
+        self.num_inst += 1
+
+
+# v0.10.0 support update_dict, but v0.9.5 does not support
+class NMSAccMetric(mx.metric.EvalMetric):
+    def __init__(self, cfg):
+        assert cfg.TRAIN.LEARN_NMS, 'config set learn nms to be false'
+        self._suffixes=['pos', 'neg']
+        super(NMSAccMetric, self).__init__('NMSAcc')
+
+    def reset(self):
+        """Resets the internal evaluation result to initial state."""
+        self.num_inst = [0, 0]
+        self.sum_metric = [0.0, 0.0]
+
+    def get(self):
+        name = []
+        value = []
+        for idx, num_inst in enumerate(self.num_inst):
+            name.append(self.name + '_' +self._suffixes[idx])
+            if num_inst == 0:
+                value.append(float('nan'))
+            else:
+                value.append(self.sum_metric[idx] / self.num_inst[idx])
+        return name, value
+
+    def update(self, labels, preds):
+        nms_multi_target = preds[-4].asnumpy()
+        nms_conditional_score = preds[-3].asnumpy()
+
+        # pos
+        valid_mask = nms_multi_target > 0.5
+        valid_score = (nms_conditional_score > 0.5)
+        num_inst = np.sum(valid_mask)
+        num_true = np.sum(valid_mask * valid_score)
+        self.sum_metric[0] += num_true
+        self.num_inst[0] += num_inst
+        # neg
+        valid_mask = nms_multi_target < 0.5
+        valid_score = (nms_conditional_score < 0.5)
+        num_inst = np.sum(valid_mask)
+        num_true = np.sum(valid_mask * valid_score)
+        self.sum_metric[1] += num_true
+        self.num_inst[1] += num_inst
+
+
+class NMSAccValidMetric(mx.metric.EvalMetric):
+    def __init__(self, cfg):
+        assert cfg.TRAIN.LEARN_NMS, 'config set learn nms to be false'
+        assert cfg.TRAIN.INSTANCE_WEIGHT, 'config set instance weight to be false'
+        self._suffixes=['pos', 'neg']
+        super(NMSAccValidMetric, self).__init__('NMSAccValid')
+
+    def reset(self):
+        """Resets the internal evaluation result to initial state."""
+        self.num_inst = [0, 0]
+        self.sum_metric = [0.0, 0.0]
+
+    def get(self):
+        name = []
+        value = []
+        for idx, num_inst in enumerate(self.num_inst):
+            name.append(self.name + '_' +self._suffixes[idx])
+            if num_inst == 0:
+                value.append(float('nan'))
+            else:
+                value.append(self.sum_metric[idx] / self.num_inst[idx])
+        return name, value
+
+    def update(self, labels, preds):
+        nms_multi_target = preds[-4].asnumpy()
+        nms_conditional_score = preds[-3].asnumpy()
+        instance_weight = preds[-5].asnumpy()
+        instance_mask = (instance_weight > 1e-8)
+
+        # pos
+        valid_mask = nms_multi_target > 0.5
+        valid_mask = valid_mask * instance_mask
+        valid_score = (nms_conditional_score > 0.5)
+        num_inst = np.sum(valid_mask)
+        num_true = np.sum(valid_mask * valid_score)
+        self.sum_metric[0] += num_true
+        self.num_inst[0] += num_inst
+        # neg
+        valid_mask = nms_multi_target < 0.5
+        valid_mask = valid_mask * instance_mask
+        valid_score = (nms_conditional_score < 0.5)
+        num_inst = np.sum(valid_mask)
+        num_true = np.sum(valid_mask * valid_score)
+        self.sum_metric[1] += num_true
+        self.num_inst[1] += num_inst

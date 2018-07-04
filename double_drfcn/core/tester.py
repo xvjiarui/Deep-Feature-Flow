@@ -243,6 +243,7 @@ def bbox_equal_count(src_boxes, dst_boxes, epsilon=1e-5):
 
     return count
 
+DEBUG = False
 def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True, show_gt=False):
     """
     wrapper for calculating offline validation for faster data analysis
@@ -336,23 +337,24 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
 
                     all_boxes[j][idx + delta] = cls_dets
 
-                    keep = nms(cls_dets)
-                    nms_cls_dets = cls_dets[keep, :]
-                    target = label_dict['nms_multi_target']
-                    target_indices = np.where(target[:, 4] == j-1)
-                    target = target[target_indices]
-                    nms_full_count_per_batch += bbox_equal_count(nms_cls_dets, target)
+                    if DEBUG:
+                        keep = nms(cls_dets)
+                        nms_cls_dets = cls_dets[keep, :]
+                        target = label_dict['nms_multi_target']
+                        target_indices = np.where(target[:, 4] == j-1)
+                        target = target[target_indices]
+                        nms_full_count_per_batch += bbox_equal_count(nms_cls_dets, target)
 
-                    gt_boxes = label_dict['gt_boxes'][0].asnumpy()
-                    gt_boxes = gt_boxes[np.where(gt_boxes[:, 4] == j)[0], :4]
-                    gt_boxes /= scales[delta]
+                        gt_boxes = label_dict['gt_boxes'][0].asnumpy()
+                        gt_boxes = gt_boxes[np.where(gt_boxes[:, 4] == j)[0], :4]
+                        gt_boxes /= scales[delta]
 
-                    if len(cls_boxes) != 0 and len(gt_boxes) != 0:
-                        overlap_mat = bbox_overlaps(cls_boxes.astype(np.float), gt_boxes.astype(np.float))
-                        keep = nms(cls_dets[np.where(overlap_mat > 0.5)[0]])
-                        nms_cls_dets = cls_dets[np.where(overlap_mat > 0.5)[0]][keep]
-                        nms_pos_count_per_batch += bbox_equal_count(nms_cls_dets, target)
-                    all_count_per_batch += len(target)
+                        if len(cls_boxes) != 0 and len(gt_boxes) != 0:
+                            overlap_mat = bbox_overlaps(cls_boxes.astype(np.float), gt_boxes.astype(np.float))
+                            keep = nms(cls_dets[np.where(overlap_mat > 0.5)[0]])
+                            nms_cls_dets = cls_dets[np.where(overlap_mat > 0.5)[0]][keep]
+                            nms_pos_count_per_batch += bbox_equal_count(nms_cls_dets, target)
+                        all_count_per_batch += len(target)
             else:
                 for j in range(1, imdb.num_classes):
                     indexes = np.where(scores[:, j] > thresh)[0]
@@ -424,23 +426,25 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
                         valid_sum += len(ref_scores)
                     ref_all_boxes[j][idx + delta] = cls_dets
 
-                    keep = nms(cls_dets)
-                    nms_cls_dets = cls_dets[keep, :]
-                    target = label_dict['ref_nms_multi_target']
-                    target_indices = np.where(target[:, 4] == j-1)
-                    target = target[target_indices]
-                    nms_full_count_per_batch += bbox_equal_count(nms_cls_dets, target)
+                    if DEBUG:
+                        pass
+                        keep = nms(cls_dets)
+                        nms_cls_dets = cls_dets[keep, :]
+                        target = label_dict['ref_nms_multi_target']
+                        target_indices = np.where(target[:, 4] == j-1)
+                        target = target[target_indices]
+                        nms_full_count_per_batch += bbox_equal_count(nms_cls_dets, target)
 
-                    gt_boxes = label_dict['ref_gt_boxes'][0].asnumpy()
-                    gt_boxes = gt_boxes[np.where(gt_boxes[:, 4] == j)[0], :4]
-                    gt_boxes /= scales[delta]
+                        gt_boxes = label_dict['ref_gt_boxes'][0].asnumpy()
+                        gt_boxes = gt_boxes[np.where(gt_boxes[:, 4] == j)[0], :4]
+                        gt_boxes /= scales[delta]
 
-                    if len(cls_boxes) != 0 and len(gt_boxes) != 0:
-                        overlap_mat = bbox_overlaps(cls_boxes.astype(np.float), gt_boxes.astype(np.float))
-                        keep = nms(cls_dets[np.where(overlap_mat > 0.5)[0]])
-                        nms_cls_dets = cls_dets[np.where(overlap_mat > 0.5)[0]][keep]
-                        nms_pos_count_per_batch += bbox_equal_count(nms_cls_dets, target)
-                    all_count_per_batch += len(target)
+                        if len(cls_boxes) != 0 and len(gt_boxes) != 0:
+                            overlap_mat = bbox_overlaps(cls_boxes.astype(np.float), gt_boxes.astype(np.float))
+                            keep = nms(cls_dets[np.where(overlap_mat > 0.5)[0]])
+                            nms_cls_dets = cls_dets[np.where(overlap_mat > 0.5)[0]][keep]
+                            nms_pos_count_per_batch += bbox_equal_count(nms_cls_dets, target)
+                        all_count_per_batch += len(target)
             else:
                 for j in range(1, imdb.num_classes):
                     indexes = np.where(ref_scores[:, j] > thresh)[0]

@@ -189,7 +189,7 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             top_k = max(1, top_k)
                             top_k = min(top_k, len(bbox_dist_mat.flatten()))
                             # top_k = 1
-                            # print("{} of out {} stable pair".format(top_k, len(bbox_dist_mat.flatten())))
+                            print("{} of out {} stable pair".format(top_k, len(bbox_dist_mat.flatten())))
                             ind_list, ref_ind_list = np.unravel_index(np.argsort(bbox_dist_mat, axis=None)[:top_k], bbox_dist_mat.shape)
                             score_sum_list = []
                             rank_sum_list = []
@@ -207,10 +207,10 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             max_idx = score_max_idx
                             ind = ind_list[max_idx]
                             ref_ind = ref_ind_list[max_idx]
-                            if ind == np.argmax(overlap_score_per_gt[valid_bbox_indices]):
-                                num_of_is_full_max[0] += 1
-                            if ref_ind == np.argmax(ref_overlap_score_per_gt[ref_valid_bbox_indices]):
-                                num_of_is_full_max[0] += 1
+                            # if ind == np.argmax(overlap_score_per_gt[valid_bbox_indices]):
+                            #     num_of_is_full_max[0] += 1
+                            # if ref_ind == np.argmax(ref_overlap_score_per_gt[ref_valid_bbox_indices]):
+                            #     num_of_is_full_max[0] += 1
                             # ind, ref_ind = np.unravel_index(np.argmin(bbox_dist_mat), bbox_dist_mat.shape)
 
                             output[valid_bbox_indices[ind]] = 1
