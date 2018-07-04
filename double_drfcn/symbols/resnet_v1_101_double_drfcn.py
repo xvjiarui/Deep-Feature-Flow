@@ -1937,6 +1937,6 @@ class resnet_v1_101_double_drfcn(Symbol):
         arg_params['bbox_pred_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['bbox_pred_bias'])
 
     def init_weight(self, cfg, arg_params, aux_params):
-        self.init_weight_nms(self, arg_params, aux_params)
-        # self.init_weight_rpn(self, arg_params, aux_params)
-        # self.init_weight_rcnn(self, arg_params, aux_params)
+        # self.init_weight_nms(self, arg_params, aux_params)
+        self.init_weight_rpn(self, arg_params, aux_params)
+        self.init_weight_rcnn(self, arg_params, aux_params)

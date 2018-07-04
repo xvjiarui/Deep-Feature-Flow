@@ -523,17 +523,17 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
         if logger:
             logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images, t1, t2, t3))
 
-    # with open(det_file, 'wb') as f:
-    #     cPickle.dump(all_boxes, f, protocol=cPickle.HIGHEST_PROTOCOL)
+    with open(det_file, 'wb') as f:
+        cPickle.dump(all_boxes, f, protocol=cPickle.HIGHEST_PROTOCOL)
 
-    # # np.save('class_lut.npy', class_lut)
+    # np.save('class_lut.npy', class_lut)
 
-    # info_str = imdb.evaluate_detections(all_boxes)
-    # if logger:
-    #     logger.info('evaluate detections: \n{}'.format(info_str))
-    #     # num_valid_classes = [len(x) for x in class_lut]
-    #     logger.info('valid class ratio:{}'.format(np.sum(num_valid_classes)/float(num_images)))
-    #     logger.info('valid score ratio:{}'.format(float(valid_tally)/float(valid_sum+0.01)))
+    info_str = imdb.evaluate_detections(all_boxes)
+    if logger:
+        logger.info('evaluate detections: \n{}'.format(info_str))
+        # num_valid_classes = [len(x) for x in class_lut]
+        logger.info('valid class ratio:{}'.format(np.sum(num_valid_classes)/float(num_images)))
+        logger.info('valid score ratio:{}'.format(float(valid_tally)/float(valid_sum+0.01)))
 
 
 def vis_all_detection(im_array, detections, class_names, scale, cfg, threshold=1e-4):
