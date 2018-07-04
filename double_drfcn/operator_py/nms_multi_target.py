@@ -104,6 +104,39 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
 
             return output_list
 
+        def get_scores_per_class(bbox_per_class, gt_box_per_class, score_per_class):
+            pass
+            # bbox [FIRST_N, 4]
+            # gt_box [, 4]
+            # score [FIRST_N]
+            num_valid_gt = len(gt_box_per_class)
+            output_list_per_class = []
+            if  num_valid_gt== 0:
+                return output_list_per_class
+
+            overlap_mat = bbox_overlaps(bbox_per_class.astype(np.float),
+                                        gt_box_per_class[:,:-1].astype(np.float))
+
+            eye_matrix = np.eye(num_valid_gt)
+            output_list_per_class = []
+
+            for thresh in self._target_thresh:
+                # following mAP metric
+                overlap_mask = (overlap_mat > thresh)
+                valid_bbox_indices = np.where(overlap_mask)[0]
+                # require score be 2-dim
+                # [first_n, num_valid_gt]
+                overlap_score = np.tile(score_per_class, (1, num_valid_gt))
+                overlap_score *= overlap_mask
+                max_overlap_indices = np.argmax(overlap_mat, axis=1)
+                # [first_n, num_valid_gt]
+                max_overlap_mask = eye_matrix[max_overlap_indices]
+                overlap_score *= max_overlap_mask
+
+                output_list_per_class.append(overlap_score)
+
+            return output_list_per_class
+
         def get_target(bbox, gt_box, score, ref_bbox, ref_gt_box, ref_score):
 
             global num_of_is_full_max
@@ -124,6 +157,12 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                 ref_valid_gt_box = ref_gt_box[0, ref_valid_gt_mask, :]
                 ref_num_valid_gt = len(ref_valid_gt_box)
 
+                score_list_per_class = score_list[cls_idx]
+                ref_score_list_per_class = ref_score_list[cls_idx]
+
+                bbox_per_class = bbox[:, cls_idx, :]
+                ref_bbox_per_class = ref_bbox[:, cls_idx, :]
+
                 if num_valid_gt != ref_num_valid_gt:
                     if ref_num_valid_gt > num_valid_gt:
                         num_rm = ref_num_valid_gt - num_valid_gt
@@ -132,6 +171,8 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             valid_gt_box.astype(np.float))
                         rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
                         ref_valid_gt_box = np.delete(ref_valid_gt_box, rm_indices, axis=0)
+                        # update ref_score_list_per_class
+                        ref_score_list_per_class = get_scores_per_class(ref_bbox_per_class, ref_valid_gt_box, ref_score[:, cls_idx])
                         assert ref_valid_gt_box.shape == valid_gt_box.shape, "failed remove ref, {} -> {}".format(ref_valid_gt_box.shape[0], valid_gt_box.shape[0])
                         print "success remove ref"
                     else:
@@ -141,18 +182,18 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             ref_valid_gt_box.astype(np.float))
                         rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
                         valid_gt_box = np.delete(valid_gt_box, rm_indices, axis=0)
+                        # update score_list_per_class
+                        score_list_per_class = get_scores_per_class(bbox_per_class, valid_gt_box, score[:, cls_idx])
                         assert ref_valid_gt_box.shape == valid_gt_box.shape, "failed remove, {} -> {}".format(ref_valid_gt_box.shape[0], valid_gt_box.shape[0])
                         print "success remove"
-                assert num_valid_gt == ref_num_valid_gt, "gt num are not the same"
-                score_list_per_class = score_list[cls_idx]
-                ref_score_list_per_class = ref_score_list[cls_idx]
 
-                bbox_per_class = bbox[:, cls_idx, :]
-                ref_bbox_per_class = ref_bbox[:, cls_idx, :]
+                assert num_valid_gt == ref_num_valid_gt, "gt num are not the same"
+
 
                 if len(score_list_per_class) == 0 or len(ref_score_list_per_class) == 0:
                     output_list.append(get_max_socre_bboxes(score_list_per_class, num_boxes))
                     ref_output_list.append(get_max_socre_bboxes(ref_score_list_per_class, ref_num_boxes))
+
                 else:
                     output_list_per_class = []
                     ref_output_list_per_class = []

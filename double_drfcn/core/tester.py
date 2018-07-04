@@ -503,11 +503,12 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
                 vis_double_all_detection(data_dict['data'].asnumpy(), boxes_this_image, data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
                 # vis_all_detection(data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
 
-        nms_full_count.append(nms_full_count_per_batch)
-        nms_pos_count.append(nms_pos_count_per_batch)
-        is_max_count.append(is_max_count_per_batch)
-        all_count.append(all_count_per_batch)
-        print("full:{} pos:{} max:{}".format(1.0*sum(nms_full_count)/sum(all_count), 1.0*sum(nms_pos_count)/sum(all_count), 1.0*sum(is_max_count)/sum(all_count)))
+        if DEBUG:
+            nms_full_count.append(nms_full_count_per_batch)
+            nms_pos_count.append(nms_pos_count_per_batch)
+            is_max_count.append(is_max_count_per_batch)
+            all_count.append(all_count_per_batch)
+            print("full:{} pos:{} max:{}".format(1.0*sum(nms_full_count)/sum(all_count), 1.0*sum(nms_pos_count)/sum(all_count), 1.0*sum(is_max_count)/sum(all_count)))
         idx += test_data.batch_size
         t3 = time.time() - t
         t = time.time()

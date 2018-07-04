@@ -206,14 +206,15 @@ def get_double_image(roidb, config, is_train=True):
         #     # print('cur', image_path)
         #     im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         im = imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
-        if not is_train:
-            print('cur', image_path)
         # update annotation
         annotation = image_path.replace("Data", "Annotations").replace("JPEG","xml")
         assert os.path.exists(annotation), '{} does not exist'.format(annotation)
+        # when not training, update boxes info
         if not is_train:
             roi_rec = load_roi_rec(annotation, roi_rec)
 
+        if not is_train:
+            print('cur', image_path)
         if roi_rec.has_key('pattern'):
             ref_id = min(max(roi_rec['frame_seg_id'] + np.random.randint(config.TRAIN.MIN_OFFSET, config.TRAIN.MAX_OFFSET+1), 0),roi_rec['frame_seg_len']-1)
             ref_image = roi_rec['pattern'] % ref_id
