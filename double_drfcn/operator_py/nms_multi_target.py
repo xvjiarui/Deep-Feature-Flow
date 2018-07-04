@@ -220,6 +220,8 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                             ref_dist_mat = translation_dist(ref_bbox_per_class[ref_valid_bbox_indices], ref_target_gt_box)[:, 0, :]
                             dist_mat_shape = (bbox_per_class[valid_bbox_indices].shape[0], 
                                 ref_bbox_per_class[ref_valid_bbox_indices].shape[0], 4)
+                            print((np.tile(np.expand_dims(dist_mat, 1), (1, dist_mat_shape[1], 1)) - 
+                                np.tile(np.expand_dims(ref_dist_mat, 0), (dist_mat_shape[0], 1, 1)))**2)
                             bbox_dist_mat = np.sum((np.tile(np.expand_dims(dist_mat, 1), (1, dist_mat_shape[1], 1)) - 
                                 np.tile(np.expand_dims(ref_dist_mat, 0), (dist_mat_shape[0], 1, 1)))**2, axis=2)
                             assert bbox_dist_mat.shape == (len(bbox_per_class[valid_bbox_indices]), len(ref_bbox_per_class[ref_valid_bbox_indices]))
