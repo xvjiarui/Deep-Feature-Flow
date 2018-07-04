@@ -799,14 +799,23 @@ class resnet_v1_101_double_drfcn_share_learn_nms(resnet_v1_101_double_drfcn):
 
     #     self.init_weight_attention_nms_multi_head(cfg, arg_params, aux_params, index=1)
 
-    def init_weight_embedding(self, cfg, arg_params, aux_params, index=1):
-        arg_params['nms_rank_{}_weight'.format(index)] = mx.random.normal(
-            0, 0.01, shape=self.arg_shape_dict['nms_rank_{}_weight'.format(index)])
-        arg_params['nms_rank_{}_bias'.format(index)] = mx.nd.zeros(shape=self.arg_shape_dict['nms_rank_{}_bias'.format(index)])
-        arg_params['roi_feat_embedding_{}_weight'.format(index)] = mx.random.normal(
-            0, 0.01, shape=self.arg_shape_dict['roi_feat_embedding_{}_weight'.format(index)])
-        arg_params['roi_feat_embedding_{}_bias'.format(index)] = mx.nd.zeros(
-            shape=self.arg_shape_dict['roi_feat_embedding_{}_bias'.format(index)])
+    # def init_weight_embedding(self, cfg, arg_params, aux_params, index=1):
+    #     arg_params['nms_rank_{}_weight'.format(index)] = mx.random.normal(
+    #         0, 0.01, shape=self.arg_shape_dict['nms_rank_{}_weight'.format(index)])
+    #     arg_params['nms_rank_{}_bias'.format(index)] = mx.nd.zeros(shape=self.arg_shape_dict['nms_rank_{}_bias'.format(index)])
+    #     arg_params['roi_feat_embedding_{}_weight'.format(index)] = mx.random.normal(
+    #         0, 0.01, shape=self.arg_shape_dict['roi_feat_embedding_{}_weight'.format(index)])
+    #     arg_params['roi_feat_embedding_{}_bias'.format(index)] = mx.nd.zeros(
+    #         shape=self.arg_shape_dict['roi_feat_embedding_{}_bias'.format(index)])
+
+    def init_weight_embedding(self, cfg, arg_params, aux_params):
+        arg_params['nms_rank_weight'] = mx.random.normal(
+            0, 0.01, shape=self.arg_shape_dict['nms_rank_weight'])
+        arg_params['nms_rank_bias'] = mx.nd.zeros(shape=self.arg_shape_dict['nms_rank_bias'])
+        arg_params['roi_feat_embedding_weight'] = mx.random.normal(
+            0, 0.01, shape=self.arg_shape_dict['roi_feat_embedding_weight'])
+        arg_params['roi_feat_embedding_bias'] = mx.nd.zeros(
+            shape=self.arg_shape_dict['roi_feat_embedding_bias'])
 
     def init_weight_nms(self, cfg, arg_params, aux_params):
         # arg_params['nms_rank_weight'] = mx.random.normal(
@@ -816,8 +825,9 @@ class resnet_v1_101_double_drfcn_share_learn_nms(resnet_v1_101_double_drfcn):
         #     0, 0.01, shape=self.arg_shape_dict['roi_feat_embedding_weight'])
         # arg_params['roi_feat_embedding_bias'] = mx.nd.zeros(
         #     shape=self.arg_shape_dict['roi_feat_embedding_bias'])
-        self.init_weight_embedding(cfg, arg_params, aux_params, index=1)
-        self.init_weight_embedding(cfg, arg_params, aux_params, index=2)
+        # self.init_weight_embedding(cfg, arg_params, aux_params, index=1)
+        # self.init_weight_embedding(cfg, arg_params, aux_params, index=2)
+        self.init_weight_embedding(cfg, arg_params, aux_params)
         arg_params['nms_logit_weight'] = mx.random.normal(
             0, 0.01, shape=self.arg_shape_dict['nms_logit_weight'])
         arg_params['nms_logit_bias'] = mx.nd.full(shape=self.arg_shape_dict['nms_logit_bias'], val=-3.0)

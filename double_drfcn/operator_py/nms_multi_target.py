@@ -199,12 +199,12 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                                 score_sum_list.append(score_sum)
                                 rank_sum_list.append(rank_sum)
                             score_max_idx = np.argmax(np.array(score_sum_list))
-                            rank_max_idx = np.argmax(np.array(rank_sum_list))
+                            rank_max_idx = np.argmin(np.array(rank_sum_list))
                             if score_max_idx == rank_max_idx:
                                 score_rank_max[0] += 1
                             score_rank_max[1] += 1
-                            max_idx = rank_max_idx
-                            # max_idx = score_max_idx
+                            # max_idx = rank_max_idx
+                            max_idx = score_max_idx
                             ind = ind_list[max_idx]
                             ref_ind = ref_ind_list[max_idx]
                             if ind == np.argmax(overlap_score_per_gt[valid_bbox_indices]):
