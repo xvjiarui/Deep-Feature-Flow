@@ -206,7 +206,7 @@ def get_double_image(roidb, config, is_train=True):
         #     # print('cur', image_path)
         #     im = cv2.imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
         im = imread(image_path, cv2.IMREAD_COLOR|cv2.IMREAD_IGNORE_ORIENTATION)
-        # update annotation
+        # update annotation when VisTest need label
         annotation = image_path.replace("Data", "Annotations").replace("JPEG","xml")
         assert os.path.exists(annotation), '{} does not exist'.format(annotation)
         # when not training, update boxes info
@@ -226,7 +226,7 @@ def get_double_image(roidb, config, is_train=True):
             ref_roi_rec = load_roi_rec(ref_annotation)
             ref_roi_rec['image'] = ref_image
             # in case of empty gt
-            while len(ref_roi_rec['gt_classes']) == 0 and ref_id < roi_rec['frame_seg_id']+max(0, config.TRAIN.MAX_OFFSET):
+            while is_train and len(ref_roi_rec['gt_classes']) == 0 and ref_id < roi_rec['frame_seg_id']+max(0, config.TRAIN.MAX_OFFSET):
                 ref_id += 1
                 ref_image = roi_rec['pattern'] % ref_id
                 assert os.path.exists(ref_image), '{} does not exist'.format(ref_image)

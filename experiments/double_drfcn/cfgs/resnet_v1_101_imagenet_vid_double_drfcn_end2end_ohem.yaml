@@ -58,7 +58,7 @@ dataset:
   dataset_path: "./data/ILSVRC2015"
   image_set: DET_train_30classes+VID_train_15frames
   root_path: "./data"
-  test_image_set: VID_val_videos_small
+  test_image_set: VID_val_videos
   proposal: rpn
 TRAIN:
   lr: 0.00025
@@ -151,5 +151,5 @@ TEST:
   NMS: 0.3
   test_epoch: 2
 
-  LEARN_NMS: true
+  LEARN_NMS: false
   MERGE_METHOD: -2

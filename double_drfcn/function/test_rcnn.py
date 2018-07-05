@@ -33,7 +33,8 @@ def get_predictor(sym, sym_instance, cfg, arg_params, aux_params, test_data, ctx
 
     # decide maximum shape
     data_names = [k[0] for k in test_data.provide_data_single]
-    label_names = [k[0] for k in test_data.provide_label_single]
+    # label_names = [k[0] for k in test_data.provide_label_single]
+    label_names = None
     max_data_shape = [[('data', (1, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),
                        ('ref_data', (1, 3, max([v[0] for v in cfg.SCALES]), max([v[1] for v in cfg.SCALES]))),]]
 
@@ -106,7 +107,8 @@ def test_rcnn(cfg, dataset, image_set, root_path, dataset_path,
     test_data = TestLoader(roidb, cfg, batch_size=1, shuffle=shuffle, has_rpn=has_rpn)
     # load model
 
-    data_shape_dict = dict(test_data.provide_data_single + test_data.provide_label_single)
+    # data_shape_dict = dict(test_data.provide_data_single + test_data.provide_label_single)
+    data_shape_dict = dict(test_data.provide_data_single)
     pprint.pprint(data_shape_dict)
     sym_instance.infer_shape(data_shape_dict)
 
@@ -118,4 +120,4 @@ def test_rcnn(cfg, dataset, image_set, root_path, dataset_path,
 
     # start detection
     #pred_eval(0, key_predictors[0], cur_predictors[0], test_datas[0], imdb, cfg, vis=vis, ignore_cache=ignore_cache, thresh=thresh, logger=logger)
-    pred_eval(predictor, test_data, imdb, cfg, vis=vis, show_gt=show_gt, ignore_cache=ignore_cache, thresh=thresh, logger=logger)
+    pred_eval(predictor, test_data, imdb, cfg, vis=vis, ignore_cache=ignore_cache, thresh=thresh, logger=logger)

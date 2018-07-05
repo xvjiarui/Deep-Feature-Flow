@@ -37,7 +37,8 @@ class Predictor(object):
         self._mod.init_params(arg_params=arg_params, aux_params=aux_params)
 
     def predict(self, data_batch):
-        self._mod.forward(data_batch, True)
+        # set to True if need gt
+        self._mod.forward(data_batch, False)
         # [dict(zip(self._mod.output_names, _)) for _ in zip(*self._mod.get_outputs(merge_multi_context=False))]
         return [dict(zip(self._mod.output_names, _)) for _ in zip(*self._mod.get_outputs(merge_multi_context=False))]
 
@@ -127,7 +128,7 @@ def generate_proposals(predictor, test_data, imdb, cfg, vis=False, thresh=0.):
     print 'wrote rpn proposals to {}'.format(rpn_file)
     return imdb_boxes
 
-def im_detect(predictor, data_batch, data_names, label_names, scales, cfg):
+def im_double_detect(predictor, data_batch, data_names, label_names, scales, cfg):
     output_all = predictor.predict(data_batch)
 
     data_dict_all = [dict(zip(data_names, idata)) for idata in data_batch.data]
@@ -200,6 +201,133 @@ def im_detect(predictor, data_batch, data_names, label_names, scales, cfg):
     return scores_all, pred_boxes_all, ref_scores_all, ref_pred_boxes_all, data_dict_all, label_dict_all
 
 
+def im_detect(predictor, data_batch, data_names, scales, cfg):
+    output_all = predictor.predict(data_batch)
+
+    data_dict_all = [dict(zip(data_names, idata)) for idata in data_batch.data]
+    scores_all = []
+    pred_boxes_all = []
+    ref_scores_all = []
+    ref_pred_boxes_all = []
+    for output, data_dict, scale in zip(output_all, data_dict_all, scales):
+        if cfg.TEST.HAS_RPN:
+            concat_rois = output['concat_rois_output'].asnumpy()[:, 1:]
+        else:
+            rois = data_dict['rois'].asnumpy().reshape((-1, 5))[:, 1:]
+        im_shape = data_dict['data'].shape
+
+        rois, ref_rois = np.split(concat_rois, 2)
+        scores = output['cls_prob_reshape_output'].asnumpy()[0]
+        bbox_deltas = output['bbox_pred_reshape_output'].asnumpy()[0]
+        ref_scores = output['cls_prob_reshape_output'].asnumpy()[1]
+        ref_bbox_deltas = output['bbox_pred_reshape_output'].asnumpy()[1]
+
+        # post processing
+        pred_boxes = bbox_pred(rois, bbox_deltas)
+        pred_boxes = clip_boxes(pred_boxes, im_shape[-2:])
+        pred_boxes /= scale
+
+        ref_pred_boxes = bbox_pred(ref_rois, ref_bbox_deltas)
+        ref_pred_boxes = clip_boxes(ref_pred_boxes, im_shape[-2:])
+        ref_pred_boxes /= scale
+
+        pred_boxes_all.append(pred_boxes)
+        scores_all.append(scores)
+        ref_pred_boxes_all.append(ref_pred_boxes)
+        ref_scores_all.append(ref_scores)
+    return scores_all, pred_boxes_all, data_dict_all
+
+
+def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True):
+    """
+    wrapper for calculating offline validation for faster data analysis
+    in this example, all threshold are set by hand
+    :param predictor: Predictor
+    :param test_data: data iterator, must be non-shuffle
+    :param imdb: image database
+    :param vis: controls visualization
+    :param thresh: valid detection threshold
+    :return:
+    """
+
+    det_file = os.path.join(imdb.result_path, imdb.name + '_detections.pkl')
+    if os.path.exists(det_file) and not ignore_cache:
+        with open(det_file, 'rb') as fid:
+            all_boxes = cPickle.load(fid)
+        info_str = imdb.evaluate_detections(all_boxes)
+        if logger:
+            logger.info('evaluate detections: \n{}'.format(info_str))
+        return
+
+    assert vis or not test_data.shuffle
+    data_names = [k[0] for k in test_data.provide_data[0]]
+
+    num_images = test_data.size
+    if not isinstance(test_data, PrefetchingIter):
+        test_data = PrefetchingIter(test_data)
+
+    nms = py_nms_wrapper(cfg.TEST.NMS)
+
+    # limit detections to max_per_image over all classes
+    max_per_image = cfg.TEST.max_per_image
+
+    # num_images = imdb.num_images
+    # all detections are collected into:
+    #    all_boxes[cls][image] = N x 5 array of detections in
+    #    (x1, y1, x2, y2, score)
+    all_boxes = [[[] for _ in range(num_images)]
+                 for _ in range(imdb.num_classes)]
+
+    idx = 0
+    data_time, net_time, post_time = 0.0, 0.0, 0.0
+    t = time.clock()
+    for im_info, ref_im_info, data_batch in test_data:
+        t1 = time.clock() - t
+        t = time.clock()
+
+        scales = [iim_info[0, 2] for iim_info in im_info]
+        scores_all, boxes_all, data_dict_all = im_detect(predictor, data_batch, data_names, scales, cfg)
+
+        t2 = time.clock() - t
+        t = time.clock()
+        for delta, (scores, boxes, data_dict) in enumerate(zip(scores_all, boxes_all, data_dict_all)):
+            for j in range(1, imdb.num_classes):
+                indexes = np.where(scores[:, j] > thresh)[0]
+                cls_scores = scores[indexes, j, np.newaxis]
+                cls_boxes = boxes[indexes, 4:8] if cfg.CLASS_AGNOSTIC else boxes[indexes, j * 4:(j + 1) * 4]
+                cls_dets = np.hstack((cls_boxes, cls_scores))
+                keep = nms(cls_dets)
+                all_boxes[j][idx+delta] = cls_dets[keep, :]
+
+            if max_per_image > 0:
+                image_scores = np.hstack([all_boxes[j][idx+delta][:, -1]
+                                          for j in range(1, imdb.num_classes)])
+                if len(image_scores) > max_per_image:
+                    image_thresh = np.sort(image_scores)[-max_per_image]
+                    for j in range(1, imdb.num_classes):
+                        keep = np.where(all_boxes[j][idx+delta][:, -1] >= image_thresh)[0]
+                        all_boxes[j][idx+delta] = all_boxes[j][idx+delta][keep, :]
+
+            if vis:
+                boxes_this_image = [[]] + [all_boxes[j][idx+delta] for j in range(1, imdb.num_classes)]
+                vis_all_detection(data_dict['data'].asnumpy(), boxes_this_image, imdb.classes, scales[delta], cfg)
+
+        idx += test_data.batch_size
+        t3 = time.clock() - t
+        t = time.clock()
+        data_time += t1
+        net_time += t2
+        post_time += t3
+        print 'testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images, data_time / idx * test_data.batch_size, net_time / idx * test_data.batch_size, post_time / idx * test_data.batch_size)
+        if logger:
+            logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images, data_time / idx * test_data.batch_size, net_time / idx * test_data.batch_size, post_time / idx * test_data.batch_size))
+
+    with open(det_file, 'wb') as f:
+        cPickle.dump(all_boxes, f, protocol=cPickle.HIGHEST_PROTOCOL)
+
+    info_str = imdb.evaluate_detections(all_boxes)
+    if logger:
+        logger.info('evaluate detections: \n{}'.format(info_str))
 def im_batch_detect(predictor, data_batch, data_names, scales, cfg):
     output_all = predictor.predict(data_batch)
 
@@ -244,7 +372,7 @@ def bbox_equal_count(src_boxes, dst_boxes, epsilon=1e-5):
     return count
 
 DEBUG = False
-def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True, show_gt=False):
+def pred_double_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True, show_gt=False):
     """
     wrapper for calculating offline validation for faster data analysis
     in this example, all threshold are set by hand

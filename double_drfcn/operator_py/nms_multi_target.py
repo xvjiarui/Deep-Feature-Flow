@@ -172,7 +172,7 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                         rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
                         ref_valid_gt_box = np.delete(ref_valid_gt_box, rm_indices, axis=0)
                         # update ref_score_list_per_class
-                        ref_score_list_per_class = get_scores_per_class(ref_bbox_per_class, ref_valid_gt_box, ref_score[:, cls_idx])
+                        ref_score_list_per_class = get_scores_per_class(ref_bbox_per_class, ref_valid_gt_box, ref_score[:, cls_idx:cls_idx+1])
                         assert ref_valid_gt_box.shape == valid_gt_box.shape, "failed remove ref, {} -> {}".format(ref_valid_gt_box.shape[0], valid_gt_box.shape[0])
                         print "success remove ref"
                     else:
@@ -183,7 +183,7 @@ class NmsMultiTargetOp(mx.operator.CustomOp):
                         rm_indices = np.argsort(np.sum(gt_overlap_mat, axis=1))[:num_rm]
                         valid_gt_box = np.delete(valid_gt_box, rm_indices, axis=0)
                         # update score_list_per_class
-                        score_list_per_class = get_scores_per_class(bbox_per_class, valid_gt_box, score[:, cls_idx])
+                        score_list_per_class = get_scores_per_class(bbox_per_class, valid_gt_box, score[:, cls_idx:cls_idx+1])
                         assert ref_valid_gt_box.shape == valid_gt_box.shape, "failed remove, {} -> {}".format(ref_valid_gt_box.shape[0], valid_gt_box.shape[0])
                         print "success remove"
 
