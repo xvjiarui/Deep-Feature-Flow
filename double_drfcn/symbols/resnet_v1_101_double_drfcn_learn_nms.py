@@ -717,8 +717,8 @@ class resnet_v1_101_double_drfcn_learn_nms(resnet_v1_101_double_drfcn):
         # sorted_score_reshape = mx.sym.BlockGrad(sorted_score_reshape)
 
         # testing nms_multi_target
-        # concat_nms_multi_score = mx.sym.broadcast_mul(lhs=concat_sorted_score_reshape, rhs=concat_nms_conditional_score)
-        concat_nms_multi_score = concat_sorted_score_reshape
+        concat_nms_multi_score = mx.sym.broadcast_mul(lhs=concat_sorted_score_reshape, rhs=concat_nms_conditional_score)
+        # concat_nms_multi_score = concat_sorted_score_reshape
 
         nms_multi_target = mx.sym.Custom(bbox=sorted_bbox, gt_bbox=gt_boxes, 
                                          score=sorted_score,
@@ -730,6 +730,7 @@ class resnet_v1_101_double_drfcn_learn_nms(resnet_v1_101_double_drfcn):
             nms_final_score = mx.sym.mean(data=concat_nms_multi_score, axis=2, name='nms_final_score')
         elif cfg.TEST.MERGE_METHOD == -2:
             nms_final_score = mx.sym.max(data=concat_nms_multi_score, axis=2, name='nms_final_score')
+            pre_nms_score = mx.sym.max(data=concat_sorted_score_reshape, axis=2, name='pre_nms_score')
         elif 0 <= cfg.TEST.MERGE_METHOD < num_thresh:
             idx = cfg.TEST.MERGE_METHOD
             nms_final_score = mx.sym.slice_axis(data=concat_nms_multi_score, axis=2, begin=idx, end=idx + 1)
@@ -741,6 +742,7 @@ class resnet_v1_101_double_drfcn_learn_nms(resnet_v1_101_double_drfcn):
         output_sym_list.append(concat_sorted_score)
         output_sym_list.append(nms_final_score)
         output_sym_list.append(nms_multi_target)
+        output_sym_list.append(pre_nms_score)
 
 
         self.sym = mx.sym.Group(output_sym_list)

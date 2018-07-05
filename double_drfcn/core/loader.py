@@ -23,7 +23,7 @@ from rcnn import get_rcnn_testbatch, get_rcnn_batch
 class VisTestLoader(mx.io.DataIter):
     def __init__(self, roidb, config, batch_size=1, shuffle=False,
                  has_rpn=False):
-        super(TestLoader, self).__init__()
+        super(VisTestLoader, self).__init__()
 
         # save parameters as properties
         self.cfg = config
@@ -182,6 +182,7 @@ class TestLoader(mx.io.DataIter):
         self.cur_roidb_index = 0
         self.cur_frameid = 0
         self.cur_seg_len = 0
+        self.key_frame_flag = -1
 
         # get first batch to fill in provide_data and provide_label
         self.reset()
@@ -221,7 +222,8 @@ class TestLoader(mx.io.DataIter):
             if self.cur_frameid == self.cur_seg_len:
                 self.cur_roidb_index += 1
                 self.cur_frameid = 0
-            return self.im_info, self.ref_im_info, mx.io.DataBatch(data=self.data, label=self.label,
+                self.key_frame_flag = 1 # end of video
+            return self.im_info, self.ref_im_info, self.key_frame_flag, mx.io.DataBatch(data=self.data, label=self.label,
                                    pad=self.getpad(), index=self.getindex(),
                                    provide_data=self.provide_data, provide_label=self.provide_label)
         else:
@@ -243,6 +245,10 @@ class TestLoader(mx.io.DataIter):
         cur_roidb['frame_seg_id'] = self.cur_frameid
         self.cur_seg_len = cur_roidb['frame_seg_len']
         data, label, im_info, ref_im_info = get_rpn_double_testbatch([cur_roidb], self.cfg)
+        if self.cur_frameid == 0:
+            self.key_frame_flag = 0 # new video
+        else:
+            self.key_frame_flag = 2 # normal frame
         self.data = [[mx.nd.array(idata[name]) for name in self.data_name] for idata in data]
         # self.label = [[mx.nd.array(ilabel[name][np.newaxis, :, :]) for name in self.label_name] for ilabel in label]
         # self.label = [[mx.nd.array(ilabel[name]) for name in self.label_name] for ilabel in label]

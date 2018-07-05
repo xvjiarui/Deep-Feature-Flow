@@ -30,15 +30,16 @@ class Predictor(object):
     def __init__(self, symbol, data_names, label_names,
                  context=mx.cpu(), max_data_shapes=None,
                  provide_data=None, provide_label=None,
-                 arg_params=None, aux_params=None):
+                 arg_params=None, aux_params=None, is_debug=False):
         self._mod = MutableModule(symbol, data_names, label_names,
                                   context=context, max_data_shapes=max_data_shapes)
         self._mod.bind(provide_data, provide_label, for_training=False)
         self._mod.init_params(arg_params=arg_params, aux_params=aux_params)
+        self.is_debug = is_debug
 
     def predict(self, data_batch):
         # set to True if need gt
-        self._mod.forward(data_batch, False)
+        self._mod.forward(data_batch, self.is_debug)
         # [dict(zip(self._mod.output_names, _)) for _ in zip(*self._mod.get_outputs(merge_multi_context=False))]
         return [dict(zip(self._mod.output_names, _)) for _ in zip(*self._mod.get_outputs(merge_multi_context=False))]
 
@@ -149,12 +150,16 @@ def im_double_detect(predictor, data_batch, data_names, label_names, scales, cfg
             concat_pred_boxes = output['concat_sorted_bbox_output'].asnumpy()
             # raw_scores = output['sorted_score_output'].asnumpy()
             concat_nms_scores = output['nms_final_score_output'].asnumpy()
+
+            concat_pre_nms_scores = output['pre_nms_score_output'].asnumpy()
             # we used scaled image & roi to train, so it is necessary to transform them back
             concat_pred_boxes = concat_pred_boxes / scale
 
+            concat_multi_scores = np.dstack((concat_nms_scores, concat_pre_nms_scores))
 
+            # concat_nms_scores /= concat_pre_nms_scores
             pred_boxes, ref_pred_boxes = np.split(concat_pred_boxes, 2)
-            scores, ref_scores = np.split(concat_nms_scores, 2)
+            scores, ref_scores = np.split(concat_multi_scores, 2)
 
             pred_boxes_all.append(pred_boxes)
             ref_pred_boxes_all.append(ref_pred_boxes)
@@ -165,12 +170,14 @@ def im_double_detect(predictor, data_batch, data_names, label_names, scales, cfg
             target, ref_target = np.split(nms_multi_target, 2)
             concat_target_boxes = concat_pred_boxes[np.where(nms_multi_target)[:2]]
             concat_target_scores = concat_nms_scores[np.where(nms_multi_target)[:2]]
+            concat_pre_target_scores = concat_pre_nms_scores[np.where(nms_multi_target)[:2]]
 
             # concat_target_boxes = concat_target_boxes / scale
 
             # construct gt style nms_multi_target, 0:30 classes
             concat_target_boxes = np.hstack((concat_target_boxes, np.where(nms_multi_target)[1][:, np.newaxis]))
             concat_target_boxes = np.hstack((concat_target_boxes, concat_target_scores[:, np.newaxis]))
+            concat_target_boxes = np.hstack((concat_target_boxes, concat_pre_target_scores[:, np.newaxis]))
 
             target_boxes, ref_target_boxes = np.split(concat_target_boxes, 2)
 
@@ -237,8 +244,20 @@ def im_detect(predictor, data_batch, data_names, scales, cfg):
         ref_scores_all.append(ref_scores)
     return scores_all, pred_boxes_all, data_dict_all
 
+def pred_eval_multiprocess(gpu_num, predictors, test_datas, imdb, cfg, vis=False, thresh=1e-4, logger=None, ignore_cache=True):
+    if gpu_num == 1:
+        res = [pred_eval(0, predictors[0], test_datas[0], imdb, cfg, vis, thresh, logger, ignore_cache),]
+    else:
+        pool = Pool(processes=gpu_num)
+        multiple_results = [pool.apply_async(pred_eval,args=(i, predictors[i], test_datas[i], imdb, cfg, vis, thresh, logger, ignore_cache)) for i in range(gpu_num)]
+        pool.close()
+        pool.join()
+        res = [res.get() for res in multiple_results]
+    info_str = imdb.evaluate_detections_multiprocess(res)
+    if logger:
+        logger.info('evaluate detections: \n{}'.format(info_str))
 
-def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True):
+def pred_eval(gpu_id, predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=None, ignore_cache=True):
     """
     wrapper for calculating offline validation for faster data analysis
     in this example, all threshold are set by hand
@@ -250,7 +269,7 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
     :return:
     """
 
-    det_file = os.path.join(imdb.result_path, imdb.name + '_detections.pkl')
+    det_file = os.path.join(imdb.result_path, imdb.name + '_'+ str(gpu_id) + '_detections.pkl')
     if os.path.exists(det_file) and not ignore_cache:
         with open(det_file, 'rb') as fid:
             all_boxes = cPickle.load(fid)
@@ -263,6 +282,9 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
     data_names = [k[0] for k in test_data.provide_data[0]]
 
     num_images = test_data.size
+    frame_ids = np.zeros(num_images, dtype=np.int)
+    roidb_frame_ids = [x['frame_id'] for x in test_data.roidb]
+
     if not isinstance(test_data, PrefetchingIter):
         test_data = PrefetchingIter(test_data)
 
@@ -278,16 +300,26 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
     all_boxes = [[[] for _ in range(num_images)]
                  for _ in range(imdb.num_classes)]
 
+    roidb_idx = -1
+    roidb_offset = -1
     idx = 0
     data_time, net_time, post_time = 0.0, 0.0, 0.0
     t = time.clock()
-    for im_info, ref_im_info, data_batch in test_data:
+    for im_info, ref_im_info, key_frame_flag, data_batch in test_data:
         t1 = time.clock() - t
         t = time.clock()
 
         scales = [iim_info[0, 2] for iim_info in im_info]
         scores_all, boxes_all, data_dict_all = im_detect(predictor, data_batch, data_names, scales, cfg)
 
+        # update if is new frame 
+        if key_frame_flag == 0:
+            roidb_idx += 1
+            roidb_offset = 0
+        else:
+            roidb_offset += 1
+
+        frame_ids[idx] = roidb_frame_ids[roidb_idx] + roidb_offset
         t2 = time.clock() - t
         t = time.clock()
         for delta, (scores, boxes, data_dict) in enumerate(zip(scores_all, boxes_all, data_dict_all)):
@@ -323,11 +355,10 @@ def pred_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, logger=No
             logger.info('testing {}/{} data {:.4f}s net {:.4f}s post {:.4f}s'.format(idx, num_images, data_time / idx * test_data.batch_size, net_time / idx * test_data.batch_size, post_time / idx * test_data.batch_size))
 
     with open(det_file, 'wb') as f:
-        cPickle.dump(all_boxes, f, protocol=cPickle.HIGHEST_PROTOCOL)
+        cPickle.dump((all_boxes, frame_ids), f, protocol=cPickle.HIGHEST_PROTOCOL)
 
-    info_str = imdb.evaluate_detections(all_boxes)
-    if logger:
-        logger.info('evaluate detections: \n{}'.format(info_str))
+    return all_boxes, frame_ids
+
 def im_batch_detect(predictor, data_batch, data_names, scales, cfg):
     output_all = predictor.predict(data_batch)
 
@@ -439,7 +470,7 @@ def pred_double_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, lo
         t = time.time()
 
         scales = [iim_info[0, 2] for iim_info in im_info]
-        scores_all, boxes_all, ref_scores_all, ref_boxes_all, data_dict_all, label_dict_all = im_detect(predictor, data_batch, data_names, label_names, scales, cfg)
+        scores_all, boxes_all, ref_scores_all, ref_boxes_all, data_dict_all, label_dict_all = im_double_detect(predictor, data_batch, data_names, label_names, scales, cfg)
 
 
         t2 = time.time() - t
@@ -453,8 +484,8 @@ def pred_double_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, lo
         for delta, (scores, boxes, ref_scores, ref_boxes, data_dict, label_dict) in enumerate(zip(scores_all, boxes_all, ref_scores_all, ref_boxes_all, data_dict_all, label_dict_all)):
             if cfg.TEST.LEARN_NMS:
                 for j in range(1, imdb.num_classes):
-                    indexes = np.where(scores[:, j-1] > thresh)[0]
-                    cls_scores = scores[indexes, j-1:j]
+                    indexes = np.where(scores[:, j-1, 0] > thresh)[0]
+                    cls_scores = scores[indexes, j-1, :]
                     cls_boxes = boxes[indexes, j-1, :]
                     cls_dets = np.hstack((cls_boxes, cls_scores))
                     # count the valid ground truth
@@ -529,6 +560,8 @@ def pred_double_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, lo
                         gt_cls = int(gt_box[4])
                         gt_box = gt_box/scales[delta]
                         gt_box[4] = 1
+                        if cfg.TEST.LEARN_NMS:
+                            gt_box = np.append(gt_box, 1)
                         boxes_this_image[gt_cls] = np.vstack((boxes_this_image[gt_cls], gt_box))
 
                     if cfg.TEST.LEARN_NMS:
@@ -537,14 +570,15 @@ def pred_double_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, lo
                             print("cur", target_box*scales[delta])
                             target_cls = int(target_box[4])+1
                             target_box[4] = 2 + target_box[5]
-                            target_box = target_box[:5]
+                            target_box[5] = target_box[6]
+                            target_box = target_box[:6]
                             boxes_this_image[target_cls] = np.vstack((boxes_this_image[target_cls], target_box))
                 # vis_all_detection(data_dict['ref_data'].asnumpy(), boxes_this_image, imdb.classes, scales[delta], cfg)
                 # vis_double_all_detection(data_dict['data'].asnumpy(), boxes_this_image, data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
             if cfg.TEST.LEARN_NMS:
                 for j in range(1, imdb.num_classes):
-                    indexes = np.where(ref_scores[:, j-1] > thresh)[0]
-                    cls_scores = ref_scores[indexes, j-1:j]
+                    indexes = np.where(ref_scores[:, j-1, 0] > thresh)[0]
+                    cls_scores = ref_scores[indexes, j-1, :]
                     cls_boxes = ref_boxes[indexes, j-1, :]
                     cls_dets = np.hstack((cls_boxes, cls_scores))
                     # count the valid ground truth
@@ -618,6 +652,8 @@ def pred_double_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, lo
                         gt_cls = int(gt_box[4])
                         gt_box = gt_box/scales[delta]
                         gt_box[4] = 1
+                        if cfg.TEST.LEARN_NMS:
+                            gt_box = np.append(gt_box, 1)
                         ref_boxes_this_image[gt_cls] = np.vstack((ref_boxes_this_image[gt_cls], gt_box))
 
                     if cfg.TEST.LEARN_NMS:
@@ -626,7 +662,8 @@ def pred_double_eval(predictor, test_data, imdb, cfg, vis=False, thresh=1e-3, lo
                             print("ref", target_box*scales[delta])
                             target_cls = int(target_box[4]) + 1
                             target_box[4] = 2 + target_box[5]
-                            target_box = target_box[:5]
+                            target_box[5] = target_box[6]
+                            target_box = target_box[:6]
                             ref_boxes_this_image[target_cls] = np.vstack((ref_boxes_this_image[target_cls], target_box))
                 vis_double_all_detection(data_dict['data'].asnumpy(), boxes_this_image, data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
                 # vis_all_detection(data_dict['ref_data'].asnumpy(), ref_boxes_this_image, imdb.classes, scales[delta], cfg)
@@ -736,7 +773,8 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
             dets = detections[j]
             for det in dets:
                 bbox = det[:4] * scale
-                score = det[-1]
+                score = det[4]
+                condition_score = det[-1]
                 if score < threshold or score==1:
                     continue
                 linewidth = 0.5 
@@ -745,7 +783,7 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
                 # elif score == 2:
                 #     linewidth = 1.5
                 color = origin_color
-                if score >= 2:
+                if score > 1:
                     color = target_color
                     linewidth = 2.5
                     score -= 2
@@ -755,8 +793,8 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
                                      edgecolor=color, linewidth=linewidth, alpha=0.7)
                 axeslist.ravel()[ind].add_patch(rect)
                 axeslist.ravel()[ind].text(bbox[0], bbox[1] - 2,
-                               '{:s} {:.3f}'.format(name, score),
-                               bbox=dict(facecolor=color, alpha=0.5), fontsize=12, color='white')
+                               '{:s} {:.3f} {:.3f}'.format(name, score, condition_score),
+                               bbox=dict(facecolor=color, alpha=0.5), fontsize=8, color='white')
     for i, title in enumerate(figures):
         ind = i+2
         im = figures[title]
@@ -772,14 +810,15 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
             dets = detections[j]
             for det in dets:
                 bbox = det[:4] * scale
-                score = det[-1]
+                score = det[4]
+                condition_score = det[-1]
                 if score < 1:
                     continue
                 linewidth = 0.5 
                 if score == 1:
                     linewidth = 3.5
                     color = origin_color
-                elif score >= 2:
+                elif score > 1:
                     linewidth = 1.5
                     color = target_color
                     score -= 2
@@ -789,8 +828,8 @@ def vis_double_all_detection(im_array, detections, ref_im_array, ref_detections,
                                      edgecolor=color, linewidth=linewidth, alpha=0.7)
                 axeslist.ravel()[ind].add_patch(rect)
                 axeslist.ravel()[ind].text(bbox[0], bbox[1] - 2,
-                               '{:s} {:.3f}'.format(name, score),
-                               bbox=dict(facecolor=color, alpha=0.5), fontsize=12, color='white')
+                               '{:s} {:.3f} {:.3f}'.format(name, score, condition_score),
+                               bbox=dict(facecolor=color, alpha=0.5), fontsize=8, color='white')
     # plt.subplots_adjust(wspace=0, hspace=0.05)
     plt.show()
 

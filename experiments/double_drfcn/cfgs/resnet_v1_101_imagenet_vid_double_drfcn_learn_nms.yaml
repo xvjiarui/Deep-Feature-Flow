@@ -3,7 +3,7 @@ MXNET_VERSION: "mxnet"
 output_path: "./output/double_drfcn/imagenet_vid"
 symbol: resnet_v1_101_double_drfcn_learn_nms
 # gpus: '0,1,2,3,4,5,6,7'
-gpus: '7'
+gpus: '3'
 # gpus: '0,1,2,3'
 CLASS_AGNOSTIC: true
 USE_PHILLY: false
